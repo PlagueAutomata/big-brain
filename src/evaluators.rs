@@ -2,17 +2,15 @@
 
 use bevy::prelude::*;
 
-/**
-Trait that any evaluators must implement. Must return an `f32` value between `0.0..=100.0`.
- */
+/// Trait that any evaluators must implement.
+/// Must return an `f32` value between `0.0..=100.0`.
 #[reflect_trait]
-pub trait Evaluator: std::fmt::Debug + Sync + Send {
+pub trait Evaluator: Sync + Send {
     fn evaluate(&self, value: f32) -> f32;
 }
 
-/**
-[`Evaluator`] for linear values. That is, there's no curve to the value mapping.
- */
+/// [`Evaluator`] for linear values.
+/// That is, there's no curve to the value mapping.
 #[derive(Debug, Clone, Reflect)]
 pub struct LinearEvaluator {
     xa: f32,
@@ -22,16 +20,15 @@ pub struct LinearEvaluator {
 }
 
 impl LinearEvaluator {
-    pub fn new() -> Self {
-        Self::new_full(0.0, 0.0, 1.0, 1.0)
+    pub fn inversed() -> Self {
+        Self::new(1.0, 0.0, 1.0, 1.0)
     }
-    pub fn new_inversed() -> Self {
-        Self::new_ranged(1.0, 0.0)
+
+    pub fn ranged(min: f32, max: f32) -> Self {
+        Self::new(min, 0.0, max, 1.0)
     }
-    pub fn new_ranged(min: f32, max: f32) -> Self {
-        Self::new_full(min, 0.0, max, 1.0)
-    }
-    fn new_full(xa: f32, ya: f32, xb: f32, yb: f32) -> Self {
+
+    fn new(xa: f32, ya: f32, xb: f32, yb: f32) -> Self {
         Self {
             xa,
             ya,
@@ -43,23 +40,19 @@ impl LinearEvaluator {
 
 impl Default for LinearEvaluator {
     fn default() -> Self {
-        Self::new()
+        Self::new(0.0, 0.0, 1.0, 1.0)
     }
 }
 
 impl Evaluator for LinearEvaluator {
     fn evaluate(&self, value: f32) -> f32 {
-        clamp(
-            self.ya + self.dy_over_dx * (value - self.xa),
-            self.ya,
-            self.yb,
-        )
+        let value = self.ya + self.dy_over_dx * (value - self.xa);
+        clamp(value, self.ya, self.yb)
     }
 }
 
-/**
-[`Evaluator`] with an exponent curve. The value will grow according to its `power` parameter.
- */
+/// [`Evaluator`] with an exponent curve.
+/// The value will grow according to its `power` parameter.
 #[derive(Debug, Clone, Reflect)]
 pub struct PowerEvaluator {
     xa: f32,
@@ -100,9 +93,7 @@ impl Evaluator for PowerEvaluator {
     }
 }
 
-/**
-[`Evaluator`] with a "Sigmoid", or "S-like" curve.
- */
+/// [`Evaluator`] with a "Sigmoid", or "S-like" curve.
 #[derive(Debug, Clone, Reflect)]
 pub struct SigmoidEvaluator {
     xa: f32,
@@ -148,11 +139,8 @@ impl Evaluator for SigmoidEvaluator {
         let cx_minus_x_mean = clamp(x, self.xa, self.xb) - self.x_mean;
         let numerator = self.two_over_dx * cx_minus_x_mean * self.one_minus_k;
         let denominator = self.k * (1.0 - 2.0 * (self.two_over_dx * cx_minus_x_mean)).abs() + 1.0;
-        clamp(
-            self.dy_over_two * (numerator / denominator) + self.y_mean,
-            self.ya,
-            self.yb,
-        )
+        let value = self.dy_over_two * (numerator / denominator) + self.y_mean;
+        clamp(value, self.ya, self.yb)
     }
 }
 

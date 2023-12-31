@@ -171,34 +171,35 @@
 //!
 //! This project is licensed under [the Apache-2.0 License](LICENSE.md).
 
-pub mod evaluators;
-pub mod pickers;
-
-pub mod actions;
+pub mod action;
 pub mod choices;
+pub mod evaluators;
 pub mod measures;
+pub mod pickers;
 pub mod scorers;
 pub mod thinker;
 
 pub mod prelude {
-    /*!
-    Convenience module with the core types you're most likely to use when working with Big Brain. Mean to be used like `use big_brain::prelude::*;`
-    */
-    use super::*;
+    //! Convenience module with the core types you're most likely to use when working with Big Brain.
+    //! Mean to be used like `use big_brain::prelude::*;`
 
-    pub use super::BigBrainPlugin;
-    pub use super::BigBrainSet;
-    pub use actions::{ActionBuilder, ActionState, ConcurrentMode, Concurrently, Steps};
-    pub use big_brain_derive::{ActionBuilder, ScorerBuilder};
-    pub use evaluators::{Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator};
-    pub use measures::{ChebyshevDistance, Measure, WeightedProduct, WeightedSum};
-    pub use pickers::{FirstToScore, Highest, Picker};
-    pub use scorers::{
-        AllOrNothing, EvaluatingScorer, FixedScore, MeasuredScorer, ProductOfScorers, Score,
-        ScorerBuilder, SumOfScorers, WinningScorer,
-    };
-    pub use thinker::{
-        Action, ActionSpan, Actor, HasThinker, Scorer, ScorerSpan, Thinker, ThinkerBuilder,
+    //pub use big_brain_derive::{ActionBuilder, ScorerBuilder};
+
+    pub use crate::{
+        action::{
+            concurent::{ConcurrentMode, Concurrently},
+            steps::Steps,
+            Action, ActionBuilder, ActionState,
+        },
+        evaluators::{Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator},
+        measures::{ChebyshevDistance, Measure, WeightedProduct, WeightedSum},
+        pickers::{FirstToScore, Highest, Picker},
+        scorers::{
+            AllOrNothing, EvaluatingScorer, FixedScore, MeasuredScorer, ProductOfScorers, Score,
+            ScorerBuilder, SumOfScorers, WinningScorer,
+        },
+        thinker::{Actor, HasThinker, Scorer, Thinker, ThinkerBuilder},
+        BigBrainPlugin, BigBrainSet,
     };
 }
 
@@ -274,7 +275,11 @@ impl Plugin for BigBrainPlugin {
         )
         .add_systems(
             self.schedule.intern(),
-            (actions::steps_system, actions::concurrent_system).in_set(BigBrainSet::Actions),
+            (
+                action::steps::steps_system,
+                action::concurent::concurrent_system,
+            )
+                .in_set(BigBrainSet::Actions),
         )
         .add_systems(
             self.cleanup_schedule.intern(),

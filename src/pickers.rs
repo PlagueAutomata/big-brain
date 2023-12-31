@@ -1,17 +1,15 @@
 //! Pickers are used by Thinkers to determine which of its Scorers will "win".
 
+use crate::{action::ActionInner, choices::Choice, scorers::Score};
 use bevy::prelude::*;
-
-use crate::{choices::Choice, scorers::Score};
 
 /// Required trait for Pickers. A Picker is given a slice of choices and a
 /// query that can be passed into `Choice::calculate`.
 ///
 /// Implementations of `pick` must return `Some(Choice)` for the `Choice` that
 /// was picked, or `None`.
-#[reflect_trait]
-pub trait Picker: std::fmt::Debug + Sync + Send {
-    fn pick<'a>(&self, choices: &'a [Choice], scores: &Query<&Score>) -> Option<&'a Choice>;
+pub trait Picker: Sync + Send {
+    fn pick(&self, choices: &[Choice], scores: &Query<&Score>) -> Option<ActionInner>;
 }
 
 /// Picker that chooses the first `Choice` with a [`Score`] higher than its
@@ -40,14 +38,11 @@ impl FirstToScore {
 }
 
 impl Picker for FirstToScore {
-    fn pick<'a>(&self, choices: &'a [Choice], scores: &Query<&Score>) -> Option<&'a Choice> {
-        for choice in choices {
-            let value = choice.calculate(scores);
-            if value >= self.threshold {
-                return Some(choice);
-            }
-        }
-        None
+    fn pick(&self, choices: &[Choice], scores: &Query<&Score>) -> Option<ActionInner> {
+        choices
+            .iter()
+            .find(|choice| choice.calculate(scores).0 >= self.threshold)
+            .map(|Choice { action, .. }| action.clone())
     }
 }
 
@@ -68,18 +63,16 @@ impl Picker for FirstToScore {
 pub struct Highest;
 
 impl Picker for Highest {
-    fn pick<'a>(&self, choices: &'a [Choice], scores: &Query<&Score>) -> Option<&'a Choice> {
-        let mut max_score = 0f32;
-
+    fn pick(&self, choices: &[Choice], scores: &Query<&Score>) -> Option<ActionInner> {
+        let mut max_score = 0.0;
         choices.iter().fold(None, |acc, choice| {
-            let score = choice.calculate(scores);
-
+            let Score(score) = choice.calculate(scores);
             if score <= max_score || score <= 0.0 {
-                return acc;
+                acc
+            } else {
+                max_score = score;
+                Some(choice.action.clone())
             }
-
-            max_score = score;
-            Some(choice)
         })
     }
 }
