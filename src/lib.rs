@@ -45,15 +45,15 @@
 //! # #[derive(Component, Debug)]
 //! # struct Thirst { thirst: f32 }
 //!
-//! #[derive(Debug, Clone, Component, ScorerBuilder)]
+//! #[derive(Debug, Clone, Component, ScorerSpawn)]
 //! pub struct Thirsty;
 //!
 //! pub fn thirsty_scorer_system(
 //!     thirsts: Query<&Thirst>,
-//!     mut query: Query<(&Actor, &mut Score), With<Thirsty>>,
+//!     mut query: Query<ScorerQuery, With<Thirsty>>,
 //! ) {
-//!     for (Actor(actor), mut score) in query.iter_mut() {
-//!         if let Ok(thirst) = thirsts.get(*actor) {
+//!     for mut score in query.iter_mut() {
+//!         if let Ok(thirst) = thirsts.get(score.actor()) {
 //!             score.set(thirst.thirst);
 //!         }
 //!     }
@@ -72,25 +72,25 @@
 //! # #[derive(Component, Debug)]
 //! # struct Thirst { thirst: f32 }
 //!
-//! #[derive(Debug, Clone, Component, ActionBuilder)]
+//! #[derive(Debug, Clone, Component, ActionSpawn)]
 //! pub struct Drink;
 //!
 //! fn drink_action_system(
 //!     mut thirsts: Query<&mut Thirst>,
-//!     mut query: Query<(&Actor, &mut ActionState), With<Drink>>,
+//!     mut query: Query<ActionQuery, With<Drink>>,
 //! ) {
-//!     for (Actor(actor), mut state) in query.iter_mut() {
-//!         if let Ok(mut thirst) = thirsts.get_mut(*actor) {
-//!             match *state {
-//!                 ActionState::Requested => {
-//!                     thirst.thirst = 10.0;
-//!                     *state = ActionState::Success;
-//!                 }
-//!                 ActionState::Cancelled => {
-//!                     *state = ActionState::Failure;
-//!                 }
-//!                 _ => {}
+//!     for mut action in query.iter_mut() {
+//!         let Ok(mut thirst) = thirsts.get_mut(action.actor()) {
+//!             continue;
+//!         };
+//!
+//!         match action.state() {
+//!             ActionState::Executing => {
+//!                 thirst.thirst = 10.0;
+//!                 action.success();
 //!             }
+//!             ActionState::Cancelled => action.failure(),
+//!             ActionState::Success | ActionState::Failure => (),
 //!         }
 //!     }
 //! }
@@ -106,15 +106,14 @@
 //! # use big_brain::prelude::*;
 //! # #[derive(Debug, Component)]
 //! # struct Thirst(f32, f32);
-//! # #[derive(Debug, Clone, Component, ScorerBuilder)]
+//! # #[derive(Debug, Clone, Component, ScorerSpawn)]
 //! # struct Thirsty;
-//! # #[derive(Debug, Clone, Component, ActionBuilder)]
+//! # #[derive(Debug, Clone, Component, ActionSpawn)]
 //! # struct Drink;
 //! fn spawn_entity(cmd: &mut Commands) {
 //!     cmd.spawn((
 //!         Thirst(70.0, 2.0),
-//!         Thinker::build()
-//!             .picker(FirstToScore { threshold: 0.8 })
+//!         Thinker::build(FirstToScore { threshold: 0.8 })
 //!             .when(Thirsty, Drink),
 //!     ));
 //! }
@@ -172,33 +171,32 @@
 //! This project is licensed under [the Apache-2.0 License](LICENSE.md).
 
 pub mod action;
-pub mod choices;
-pub mod evaluators;
+pub mod evaluator;
 pub mod measures;
 pub mod pickers;
-pub mod scorers;
+pub mod scorer;
+pub mod sequence;
 pub mod thinker;
 
 pub mod prelude {
     //! Convenience module with the core types you're most likely to use when working with Big Brain.
     //! Mean to be used like `use big_brain::prelude::*;`
 
-    //pub use big_brain_derive::{ActionBuilder, ScorerBuilder};
+    pub use big_brain_derive::{ActionSpawn, ScorerSpawn};
 
     pub use crate::{
-        action::{
-            concurent::{ConcurrentMode, Concurrently},
-            steps::Steps,
-            Action, ActionBuilder, ActionState,
+        action::{Action, ActionCommands, ActionQuery, ActionSpawn, ActionState},
+        evaluator::{
+            EvaluatingScorer, Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator,
         },
-        evaluators::{Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator},
-        measures::{ChebyshevDistance, Measure, WeightedProduct, WeightedSum},
+        measures::{Measure, MeasuredScorer, WeightedScore},
         pickers::{FirstToScore, Highest, Picker},
-        scorers::{
-            AllOrNothing, EvaluatingScorer, FixedScore, MeasuredScorer, ProductOfScorers, Score,
-            ScorerBuilder, SumOfScorers, WinningScorer,
+        scorer::{
+            AllOrNothing, FixedScore, ProductOfScorers, Score, Scorer, ScorerCommands, ScorerQuery,
+            ScorerSpawn, ScorerSpawner, SumOfScorers, WinningScorer,
         },
-        thinker::{Actor, HasThinker, Scorer, Thinker, ThinkerBuilder},
+        sequence::{Sequence, SequenceMode},
+        thinker::{Actor, HasThinker, Thinker, ThinkerBuilder},
         BigBrainPlugin, BigBrainSet,
     };
 }
@@ -250,8 +248,8 @@ impl Plugin for BigBrainPlugin {
             self.schedule.intern(),
             (
                 BigBrainSet::Scorers,
-                BigBrainSet::Thinkers,
                 BigBrainSet::Actions,
+                BigBrainSet::Thinkers,
             )
                 .chain(),
         )
@@ -259,34 +257,38 @@ impl Plugin for BigBrainPlugin {
         .add_systems(
             self.schedule.intern(),
             (
-                scorers::fixed_score_system,
-                scorers::measured_scorers_system,
-                scorers::all_or_nothing_system,
-                scorers::sum_of_scorers_system,
-                scorers::product_of_scorers_system,
-                scorers::winning_scorer_system,
-                scorers::evaluating_scorer_system,
+                (
+                    crate::scorer::fixed_score_system,
+                    crate::measures::measured_scorers_system,
+                    crate::scorer::all_or_nothing_system,
+                    crate::scorer::sum_of_scorers_system,
+                    crate::scorer::product_of_scorers_system,
+                    crate::scorer::compensated_product_of_scorers_system,
+                    crate::scorer::winning_scorer_system,
+                    crate::evaluator::evaluating_scorer_system,
+                ),
+                apply_deferred,
             )
+                .chain()
                 .in_set(BigBrainSet::Scorers),
         )
         .add_systems(
             self.schedule.intern(),
-            thinker::thinker_system.in_set(BigBrainSet::Thinkers),
-        )
-        .add_systems(
-            self.schedule.intern(),
             (
-                action::steps::steps_system,
-                action::concurent::concurrent_system,
+                apply_deferred,
+                crate::sequence::sequence_system,
+                apply_deferred,
+                crate::thinker::thinker_system,
             )
-                .in_set(BigBrainSet::Actions),
+                .chain()
+                .in_set(BigBrainSet::Thinkers),
         )
         .add_systems(
             self.cleanup_schedule.intern(),
             (
-                thinker::thinker_component_attach_system,
-                thinker::thinker_component_detach_system,
-                thinker::actor_gone_cleanup,
+                crate::thinker::thinker_component_attach_system,
+                crate::thinker::thinker_component_detach_system,
+                crate::thinker::actor_gone_cleanup,
             )
                 .in_set(BigBrainSet::Cleanup),
         );

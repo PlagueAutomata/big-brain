@@ -1,7 +1,34 @@
 //! Pickers are used by Thinkers to determine which of its Scorers will "win".
 
-use crate::{action::ActionInner, choices::Choice, scorers::Score};
+use crate::{
+    action::{ActionInner, ActionSpawn},
+    scorer::{Score, Scorer, ScorerSpawn},
+};
 use bevy::prelude::*;
+use std::sync::Arc;
+
+/// Contains different types of Considerations and Actions
+#[derive(Clone)]
+pub struct Choice {
+    pub(crate) scorer: Scorer,
+    pub(crate) action: ActionInner,
+}
+
+impl Choice {
+    pub fn calculate(&self, scores: &Query<&Score>) -> Score {
+        scores
+            .get(self.scorer.0)
+            .cloned()
+            .expect("Where did the score go?")
+    }
+}
+
+/// Builds a new [`Choice`].
+#[derive(Clone)]
+pub struct ChoiceBuilder {
+    pub when: Arc<dyn ScorerSpawn>,
+    pub then: Arc<dyn ActionSpawn>,
+}
 
 /// Required trait for Pickers. A Picker is given a slice of choices and a
 /// query that can be passed into `Choice::calculate`.
@@ -20,8 +47,7 @@ pub trait Picker: Sync + Send {
 /// ```
 /// # use big_brain::prelude::*;
 /// # fn main() {
-/// Thinker::build()
-///     .picker(FirstToScore::new(0.8))
+/// Thinker::build(FirstToScore::new(0.8))
 ///     // .when(...)
 /// # ;
 /// # }
@@ -53,8 +79,7 @@ impl Picker for FirstToScore {
 /// ```
 /// # use big_brain::prelude::*;
 /// # fn main() {
-/// Thinker::build()
-///     .picker(Highest)
+/// Thinker::build(Highest)
 ///     // .when(...)
 /// # ;
 /// # }

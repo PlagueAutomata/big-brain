@@ -52,7 +52,7 @@ pub fn thirst_system(time: Res<Time>, mut thirsts: Query<&mut Thirst>) {
 }
 
 /// An action where the actor moves to the closest water source
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 pub struct MoveToWaterSource {
     // The movement speed of the actor.
     speed: f32,
@@ -68,23 +68,19 @@ fn move_to_water_source_action_system(
     // We use Without to make disjoint queries.
     mut positions: Query<&mut Position, Without<WaterSource>>,
     // A query on all current MoveToWaterSource actions.
-    mut action_query: Query<(&Actor, &mut ActionState, &MoveToWaterSource, &ActionSpan)>,
+    mut action_query: Query<(ActionQuery, &MoveToWaterSource)>,
 ) {
     // Loop through all actions, just like you'd loop over all entities in any other query.
-    for (actor, mut action_state, move_to, span) in &mut action_query {
-        let _guard = span.span().enter();
-
+    for (mut action, move_to) in action_query.iter_mut() {
         // Different behavior depending on action state.
-        match *action_state {
-            // Action was just requested; it hasn't been seen before.
-            ActionState::Requested => {
-                debug!("Let's go find some water!");
-                // We don't really need any initialization code here, since the queries are cheap enough.
-                *action_state = ActionState::Executing;
-            }
+        match action.state() {
             ActionState::Executing => {
+                // debug!("Let's go find some water!");
+
                 // Look up the actor's position.
-                let mut actor_position = positions.get_mut(actor.0).expect("actor has no position");
+                let mut actor_position = positions
+                    .get_mut(action.actor())
+                    .expect("actor has no position");
 
                 trace!("Actor position: {:?}", actor_position.position);
 
@@ -116,7 +112,7 @@ fn move_to_water_source_action_system(
                     debug!("We got there!");
 
                     // The action will be cleaned up automatically.
-                    *action_state = ActionState::Success;
+                    action.success();
                 }
             }
             ActionState::Cancelled => {
@@ -124,7 +120,7 @@ fn move_to_water_source_action_system(
                 // You don't need to terminate immediately, by the way, this is only a flag that
                 // the cancellation has been requested. If the actor is balancing on a tightrope,
                 // for instance, you may let them walk off before ending the action.
-                *action_state = ActionState::Failure;
+                action.failure();
             }
             _ => {}
         }
@@ -147,7 +143,7 @@ fn find_closest_water_source(
 }
 
 /// A simple action: the actor's thirst shall decrease, but only if they are near a water source.
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 pub struct Drink {
     per_second: f32,
 }
@@ -156,22 +152,20 @@ fn drink_action_system(
     time: Res<Time>,
     mut thirsts: Query<(&Position, &mut Thirst), Without<WaterSource>>,
     waters: Query<&Position, With<WaterSource>>,
-    mut query: Query<(&Actor, &mut ActionState, &Drink, &ActionSpan)>,
+    mut query: Query<(ActionQuery, &Drink)>,
 ) {
     // Loop through all actions, just like you'd loop over all entities in any other query.
-    for (Actor(actor), mut state, drink, span) in &mut query {
-        let _guard = span.span().enter();
-
+    for (mut action, drink) in &mut query {
         // Look up the actor's position and thirst from the Actor component in the action entity.
-        let (actor_position, mut thirst) = thirsts.get_mut(*actor).expect("actor has no thirst");
+        let (actor_position, mut thirst) = thirsts
+            .get_mut(action.actor())
+            .expect("actor has no thirst");
 
-        match *state {
-            ActionState::Requested => {
-                // We'll start drinking as soon as we're requested to do so.
-                debug!("Drinking the water.");
-                *state = ActionState::Executing;
-            }
+        match action.state() {
             ActionState::Executing => {
+                // We'll start drinking as soon as we're requested to do so.
+                // debug!("Drinking the water.");
+
                 // Look up the closest water source.
                 // Note that there is no explicit passing of a selected water source from the GoToWaterSource action,
                 // so we look it up again. Note that this decouples the actions from each other,
@@ -196,36 +190,36 @@ fn drink_action_system(
                     // Once we hit 0 thirst, we stop drinking and report success.
                     if thirst.thirst <= 0.0 {
                         thirst.thirst = 0.0;
-                        *state = ActionState::Success;
+                        action.success();
                     }
                 } else {
                     // The actor was told to drink, but they can't drink when they're so far away!
                     // The action doesn't know how to deal with this case, it's the overarching system's
                     // to fulfill the precondition.
                     debug!("We're too far away!");
-                    *state = ActionState::Failure;
+                    action.failure();
                 }
             }
+
             // All Actions should make sure to handle cancellations!
             // Drinking is not a complicated action, so we can just interrupt it immediately.
-            ActionState::Cancelled => {
-                *state = ActionState::Failure;
-            }
-            _ => {}
+            ActionState::Cancelled => action.failure(),
+
+            ActionState::Success | ActionState::Failure => (),
         }
     }
 }
 
 // Scorers are the same as in the thirst example.
-#[derive(Clone, Component, Debug, ScorerBuilder)]
+#[derive(Clone, Component, Debug, ScorerSpawn)]
 pub struct Thirsty;
 
 pub fn thirsty_scorer_system(
     thirsts: Query<&Thirst>,
-    mut query: Query<(&Actor, &mut Score), With<Thirsty>>,
+    mut query: Query<ScorerQuery, With<Thirsty>>,
 ) {
-    for (Actor(actor), mut score) in &mut query {
-        if let Ok(thirst) = thirsts.get(*actor) {
+    for mut score in &mut query {
+        if let Ok(thirst) = thirsts.get(score.actor()) {
             score.set(thirst.thirst / 100.);
         }
     }
@@ -255,19 +249,16 @@ pub fn init_entities(mut cmd: Commands) {
     // drink either. Getting them un-stuck from that situation is then up to other possible actions.
     //
     // We build up a list of steps that make it so that the actor will...
-    let move_and_drink = Steps::build()
-        .label("MoveAndDrink")
+    let move_and_drink = Sequence::step((
         // ...move to the water source...
-        .step(MoveToWaterSource { speed: 1.0 })
+        MoveToWaterSource { speed: 1.0 },
         // ...and then drink.
-        .step(Drink { per_second: 10.0 });
+        Drink { per_second: 10.0 },
+    ));
 
     // Build the thinker
-    let thinker = Thinker::build()
-        .label("ThirstyThinker")
-        // We don't do anything unless we're thirsty enough.
-        .picker(FirstToScore { threshold: 0.8 })
-        .when(Thirsty, move_and_drink);
+    // We don't do anything unless we're thirsty enough.
+    let thinker = Thinker::build(FirstToScore { threshold: 0.8 }).when(Thirsty, move_and_drink);
 
     cmd.spawn((
         Thirst::new(75.0, 2.0),

@@ -20,6 +20,7 @@ big-brain-derive = { version = "=0.18.0", path = "./derive" }
 [dev-dependencies]
 bevy = { version = "0.12.1", default-features = true }
 rand = { version = "0.8.5", features = ["small_rng"] }
+bevy-scene-hook = "9.0.0"
 
 [features]
 trace = []

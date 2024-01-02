@@ -12,7 +12,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
 /// An action where the actor has to guess a given number
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 pub struct GuessNumber {
     // Number to guess (between 0 and 10 included)
     to_guess: u8,
@@ -20,107 +20,83 @@ pub struct GuessNumber {
     rng: SmallRng,
 }
 
+impl GuessNumber {
+    fn from_entropy(to_guess: u8) -> Self {
+        let rng = SmallRng::from_entropy();
+        Self { to_guess, rng }
+    }
+}
+
 fn guess_number_action(
     // A query on all current MoveToWaterSource actions.
-    mut action_query: Query<(&Actor, &mut ActionState, &mut GuessNumber, &ActionSpan)>,
+    mut action_query: Query<(ActionQuery, &mut GuessNumber)>,
 ) {
     // Loop through all actions, just like you'd loop over all entities in any other query.
-    for (_actor, mut action_state, mut guess_number, span) in &mut action_query {
-        let _guard = span.span().enter();
-
+    for (mut action, mut guess_number) in &mut action_query {
         // Different behavior depending on action state.
-        match *action_state {
-            // Action was just requested; it hasn't been seen before.
-            ActionState::Requested => {
-                debug!(
-                    "Let's try to guess the secret number: {:?}",
-                    guess_number.to_guess
-                );
-                // We don't really need any initialization code here, since the queries are cheap enough.
-                *action_state = ActionState::Executing;
-            }
+        match action.state() {
             ActionState::Executing => {
+                // debug!("Let's try to guess the secret number: {:?}", guess_number.to_guess);
+
                 // Guess a number. If we guessed right, succeed; else keep trying.
                 let guess: u8 = guess_number.rng.gen_range(0..=10);
                 debug!("Guessed: {:?}", guess);
                 if guess == guess_number.to_guess {
-                    debug!(
-                        "Guessed the secret number: {:?}! Action succeeded.",
-                        guess_number.to_guess
-                    );
-                    *action_state = ActionState::Success;
+                    debug!("Guessed the secret number: {:?}!", guess_number.to_guess);
+                    action.success();
                 }
             }
-            ActionState::Cancelled => {
-                // Always treat cancellations, or we might keep doing this forever!
-                // You don't need to terminate immediately, by the way, this is only a flag that
-                // the cancellation has been requested. If the actor is balancing on a tightrope,
-                // for instance, you may let them walk off before ending the action.
-                *action_state = ActionState::Failure;
-            }
-            _ => {}
+
+            // Always treat cancellations, or we might keep doing this forever!
+            // You don't need to terminate immediately, by the way, this is only a flag that
+            // the cancellation has been requested. If the actor is balancing on a tightrope,
+            // for instance, you may let them walk off before ending the action.
+            ActionState::Cancelled => action.failure(),
+
+            ActionState::Success | ActionState::Failure => (),
         }
     }
 }
 
 // We will use a dummy scorer that always returns 1.0
-#[derive(Clone, Component, Debug, ScorerBuilder)]
+#[derive(Clone, Component, Debug, ScorerSpawn)]
 pub struct DummyScorer;
 
-pub fn dummy_scorer_system(mut query: Query<(&Actor, &mut Score), With<DummyScorer>>) {
-    for (Actor(_actor), mut score) in &mut query {
+pub fn dummy_scorer_system(mut query: Query<ScorerQuery, With<DummyScorer>>) {
+    for mut score in &mut query {
         score.set(1.0);
     }
 }
 
 pub fn init_entities(mut cmd: Commands) {
     let number_to_guess: u8 = 5;
+
     // We use the Race struct to build a composite action that will try to guess
     // multiple numbers. If any of the guesses are right, the whole `Race` action succeeds.
-    let race_guess_numbers = Concurrently::build()
-        .mode(ConcurrentMode::Race)
-        .label("RaceToGuessNumbers")
+    let race_guess_numbers = Sequence::race((
         // ...try to guess a first number
-        .push(GuessNumber {
-            to_guess: number_to_guess,
-            rng: SmallRng::from_entropy(),
-        })
+        GuessNumber::from_entropy(number_to_guess),
         // ...try to guess a second number
-        .push(GuessNumber {
-            to_guess: number_to_guess,
-            rng: SmallRng::from_entropy(),
-        });
+        GuessNumber::from_entropy(number_to_guess),
+    ));
 
     // We use the Join struct to build a composite action that will try to guess
     // multiple numbers. If all of the guesses are right, the whole `Race` action succeeds.
-    let join_guess_numbers = Concurrently::build()
-        .mode(ConcurrentMode::Join) // This is the default mode, so we could have omitted it.
-        .label("JoinToGuessNumbers")
+    let join_guess_numbers = Sequence::join((
         // ...try to guess a first number
-        .push(GuessNumber {
-            to_guess: number_to_guess,
-            rng: SmallRng::from_entropy(),
-        })
+        GuessNumber::from_entropy(number_to_guess),
         // ...try to guess a second number
-        .push(GuessNumber {
-            to_guess: number_to_guess,
-            rng: SmallRng::from_entropy(),
-        });
+        GuessNumber::from_entropy(number_to_guess),
+    ));
 
     // We'll use `Steps` to execute a sequence of actions.
     // First, we'll guess the numbers with 'Race', and then we'll guess the numbers with 'Join'
     // See the `sequence.rs` example for more details.
-    let guess_numbers = Steps::build()
-        .label("RaceAndThenJoin")
-        .step(race_guess_numbers)
-        .step(join_guess_numbers);
+    let steps_guess_numbers = Sequence::step((race_guess_numbers, join_guess_numbers));
 
     // Build the thinker
-    let thinker = Thinker::build()
-        .label("GuesserThinker")
-        // always select the action with the highest score
-        .picker(Highest)
-        .when(DummyScorer, guess_numbers);
+    // always select the action with the highest score
+    let thinker = Thinker::build(Highest).when(DummyScorer, steps_guess_numbers);
 
     cmd.spawn(thinker);
 }

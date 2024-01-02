@@ -5,23 +5,17 @@ use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::utils::tracing::debug;
 use big_brain::prelude::*;
-use big_brain::scorers::MeasuredScorer;
 
 // Lets define a custom measure. There are quite a few built-in ones in big-brain,
 // so we'll create a slightly useless Measure that sums together the weighted scores,
 // but weights get divided by the Scorer's index in the Vec.
-#[derive(Debug, Clone)]
-pub struct SumWithDecreasingWeightMeasure;
-
-impl Measure for SumWithDecreasingWeightMeasure {
-    fn calculate(&self, scores: Vec<(&Score, f32)>) -> f32 {
-        scores
-            .iter()
-            .enumerate()
-            .fold(0f32, |acc, (idx, (score, weight))| {
-                acc + score.get() * weight / (1.0 + idx as f32)
-            })
-    }
+fn sum_with_decreasing_weight_measure(scores: &[WeightedScore]) -> f32 {
+    scores
+        .iter()
+        .enumerate()
+        .fold(0.0, |acc, (idx, WeightedScore { score, weight })| {
+            acc + score * weight / (1.0 + idx as f32)
+        })
 }
 
 // We'll keep this example fairly simple, let's have Waffles and Pancakes, and
@@ -73,10 +67,10 @@ impl EatFood for Waffles {
 }
 
 // ok so now we can specify our actions
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 pub struct EatPancakes;
 
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 pub struct EatWaffles;
 
 fn eat_thing_action<
@@ -87,18 +81,14 @@ fn eat_thing_action<
     mut items: Query<&mut TActorMarker>,
     // We execute actions by querying for their associated Action Component
     // (Drink in this case). You'll always need both Actor and ActionState.
-    mut query: Query<(&Actor, &mut ActionState, &TActionMarker, &ActionSpan)>,
+    mut query: Query<(ActionQuery, &TActionMarker)>,
 ) {
-    for (Actor(actor), mut state, action_marker, span) in query.iter_mut() {
-        let _guard = span.span().enter();
-
-        if let Ok(mut item) = items.get_mut(*actor) {
-            match *state {
-                ActionState::Requested => {
-                    info!("Time to {:?}", action_marker);
-                    *state = ActionState::Executing;
-                }
+    for (mut action, action_marker) in query.iter_mut() {
+        if let Ok(mut item) = items.get_mut(action.actor()) {
+            match action.state() {
                 ActionState::Executing => {
+                    // info!("Time to {:?}", action_marker);
+
                     debug!("You should {:?}", action_marker);
 
                     item.eat(time.delta_seconds() * 5.0);
@@ -106,7 +96,7 @@ fn eat_thing_action<
                     // we should stop at some eating pancakes at some point, unfortunately
                     if item.get() > 80.0 {
                         info!("You shouldn't {:?}", action_marker);
-                        *state = ActionState::Success;
+                        action.success();
                     }
                 }
                 // All Actions should make sure to handle cancellations!
@@ -115,19 +105,20 @@ fn eat_thing_action<
                         "Cancelled eating {:?}. Considering this a failure.",
                         action_marker
                     );
-                    *state = ActionState::Failure;
+                    action.failure();
                 }
-                _ => {}
+
+                ActionState::Success | ActionState::Failure => (),
             }
         }
     }
 }
 
 // Next we need to implement our Scorers, one for each of our Pancake and Waffle eating habits.
-#[derive(Clone, Component, Debug, ScorerBuilder)]
+#[derive(Clone, Component, Debug, ScorerSpawn)]
 pub struct CravingPancakes;
 
-#[derive(Clone, Component, Debug, ScorerBuilder)]
+#[derive(Clone, Component, Debug, ScorerSpawn)]
 pub struct CravingWaffles;
 
 // We can make our Scorer generic as well I guess?
@@ -136,10 +127,10 @@ pub fn craving_food_scorer<
     TActorMarker: Component + EatFood,
 >(
     items: Query<&TActorMarker>,
-    mut query: Query<(&Actor, &mut Score), With<TScoreMarker>>,
+    mut query: Query<ScorerQuery, With<TScoreMarker>>,
 ) {
-    for (Actor(actor), mut score) in &mut query {
-        if let Ok(item) = items.get(*actor) {
+    for mut score in &mut query {
+        if let Ok(item) = items.get(score.actor()) {
             // we don't want to get too full here, so lets say we only eat if we get below 0.5
             let current_food = item.get();
 
@@ -159,26 +150,23 @@ pub fn init_entities(mut cmd: Commands) {
     cmd.spawn((
         Pancakes(50.0),
         Waffles(50.0),
-        Thinker::build()
-            .label("Hungry Thinker")
-            .picker(FirstToScore::new(0.5))
+        Thinker::build(FirstToScore::new(0.5))
             // we use our custom measure here. The impact of the custom measure is that the
             // pancakes should be down-weighted. This means despite this being listed first,
             // all things being equal we should consume pancakes before waffles.
             .when(
-                MeasuredScorer::build(0.1)
-                    .label("eat some waffles")
-                    .measure(SumWithDecreasingWeightMeasure)
-                    .push(CravingWaffles, 1.0)
-                    .push(CravingPancakes, 1.0),
+                // "eat some waffles"
+                MeasuredScorer::custom(
+                    0.1,
+                    sum_with_decreasing_weight_measure,
+                    ((CravingWaffles, 1.0), (CravingPancakes, 1.0)),
+                ),
                 EatWaffles,
             )
             // we use the default measure here
             .when(
-                MeasuredScorer::build(0.1)
-                    .label("eat some pancakes")
-                    .push(CravingPancakes, 1.0)
-                    .push(CravingWaffles, 1.0),
+                // "eat some pancakes
+                MeasuredScorer::measure(0.1, ((CravingPancakes, 1.0), (CravingWaffles, 1.0))),
                 EatPancakes,
             ),
     ));

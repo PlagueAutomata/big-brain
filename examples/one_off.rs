@@ -3,22 +3,21 @@ use bevy::prelude::*;
 use bevy::utils::tracing::{debug, trace};
 use big_brain::prelude::*;
 
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 struct OneOff;
 
-fn one_off_action_system(mut query: Query<(&mut ActionState, &ActionSpan), With<OneOff>>) {
-    for (mut state, span) in &mut query {
-        let _guard = span.span().enter();
-        match *state {
-            ActionState::Requested => {
+fn one_off_action_system(mut query: Query<ActionQuery, With<OneOff>>) {
+    for mut action in &mut query {
+        match action.state() {
+            ActionState::Executing => {
                 debug!("One-off action!");
-                *state = ActionState::Success;
+                action.success();
             }
             ActionState::Cancelled => {
                 debug!("One-off action was cancelled. Considering this a failure.");
-                *state = ActionState::Failure;
+                action.failure();
             }
-            _ => {}
+            ActionState::Success | ActionState::Failure => (),
         }
     }
 }
@@ -28,9 +27,7 @@ pub fn init_entities(mut cmd: Commands) {
     // actions. It's not a general-purpose task scheduler.
     cmd.spawn((
         Thirst::new(75.0, 2.0),
-        Thinker::build()
-            .label("My Thinker")
-            .picker(FirstToScore { threshold: 0.8 }),
+        Thinker::build(FirstToScore { threshold: 0.8 }),
     ));
 }
 
@@ -51,14 +48,13 @@ pub fn thirst_system(
     mut thirsts: Query<(Entity, &mut Thirst)>,
     // We need to get to the Thinker. That takes a couple of steps.
     has_thinkers: Query<&HasThinker>,
-    mut thinkers: Query<(&mut Thinker, &ActionSpan)>,
+    mut thinkers: Query<&mut Thinker>,
 ) {
     for (actor, mut thirst) in &mut thirsts {
         thirst.thirst += thirst.per_second * (time.delta().as_micros() as f32 / 1_000_000.0);
         if thirst.thirst >= 100.0 {
             let thinker_ent = has_thinkers.get(actor).unwrap().entity();
-            let (mut thinker, span) = thinkers.get_mut(thinker_ent).unwrap();
-            let _guard = span.span().enter();
+            let mut thinker = thinkers.get_mut(thinker_ent).unwrap();
             debug!("Scheduling one-off action");
             thinker.schedule_action(OneOff);
             thirst.thirst = 0.0;

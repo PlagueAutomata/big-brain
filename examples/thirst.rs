@@ -47,7 +47,7 @@ pub fn thirst_system(time: Res<Time>, mut thirsts: Query<&mut Thirst>) {
 // actor entity. In this case, you can use the derive macro `ActionBuilder`
 // to make your Action Component implement the ActionBuilder trait.
 // You need your type to implement Clone and Debug (necessary for ActionBuilder)
-#[derive(Clone, Component, Debug, ActionBuilder)]
+#[derive(Clone, Component, Debug, ActionSpawn)]
 pub struct Drink {
     until: f32,
     per_second: f32,
@@ -60,21 +60,15 @@ fn drink_action_system(
     mut thirsts: Query<&mut Thirst>,
     // We execute actions by querying for their associated Action Component
     // (Drink in this case). You'll always need both Actor and ActionState.
-    mut query: Query<(&Actor, &mut ActionState, &Drink, &ActionSpan)>,
+    mut query: Query<(ActionQuery, &Drink)>,
 ) {
-    for (Actor(actor), mut state, drink, span) in &mut query {
-        // This sets up the tracing scope. Any `debug` calls here will be
-        // spanned together in the output.
-        let _guard = span.span().enter();
-
+    for (mut action, drink) in &mut query {
         // Use the drink_action's actor to look up the corresponding Thirst Component.
-        if let Ok(mut thirst) = thirsts.get_mut(*actor) {
-            match *state {
-                ActionState::Requested => {
-                    debug!("Time to drink some water!");
-                    *state = ActionState::Executing;
-                }
+        if let Ok(mut thirst) = thirsts.get_mut(action.actor()) {
+            match action.state() {
                 ActionState::Executing => {
+                    // debug!("Time to drink some water!");
+
                     trace!("Drinking...");
                     thirst.thirst -=
                         drink.per_second * (time.delta().as_micros() as f32 / 1_000_000.0);
@@ -82,13 +76,13 @@ fn drink_action_system(
                         // To "finish" an action, we set its state to Success or
                         // Failure.
                         debug!("Done drinking water");
-                        *state = ActionState::Success;
+                        action.success();
                     }
                 }
                 // All Actions should make sure to handle cancellations!
                 ActionState::Cancelled => {
                     debug!("Action was cancelled. Considering this a failure.");
-                    *state = ActionState::Failure;
+                    action.failure();
                 }
                 _ => {}
             }
@@ -105,17 +99,17 @@ fn drink_action_system(
 //
 // Again, in most cases, you can use the `ScorerBuilder` derive macro to make your
 // Scorer Component act as a ScorerBuilder. You need it to implement Clone and Debug.
-#[derive(Clone, Component, Debug, ScorerBuilder)]
+#[derive(Clone, Component, Debug, ScorerSpawn)]
 pub struct Thirsty;
 
 // Looks familiar? It's a lot like Actions!
 pub fn thirsty_scorer_system(
     thirsts: Query<&Thirst>,
     // Same dance with the Actor here, but now we use look up Score instead of ActionState.
-    mut query: Query<(&Actor, &mut Score, &ScorerSpan), With<Thirsty>>,
+    mut query: Query<ScorerQuery, With<Thirsty>>,
 ) {
-    for (Actor(actor), mut score, span) in &mut query {
-        if let Ok(thirst) = thirsts.get(*actor) {
+    for mut score in &mut query {
+        if let Ok(thirst) = thirsts.get(score.actor()) {
             // This is really what the job of a Scorer is. To calculate a
             // generic "Utility" score that the Big Brain engine will compare
             // against others, over time, and use to make decisions. This is
@@ -125,9 +119,7 @@ pub fn thirsty_scorer_system(
             // The score here must be between 0.0 and 1.0.
             score.set(thirst.thirst / 100.0);
             if thirst.thirst >= 80.0 {
-                span.span().in_scope(|| {
-                    debug!("Thirst above threshold! Score: {}", thirst.thirst / 100.0)
-                });
+                debug!("Thirst above threshold! Score: {}", thirst.thirst / 100.0)
             }
         }
     }
@@ -140,9 +132,7 @@ pub fn init_entities(mut cmd: Commands) {
     // Create the entity and throw the Thirst component in there. Nothing special here.
     cmd.spawn((
         Thirst::new(75.0, 2.0),
-        Thinker::build()
-            .label("My Thinker")
-            .picker(FirstToScore { threshold: 0.8 })
+        Thinker::build(FirstToScore { threshold: 0.8 })
             // Technically these are supposed to be ActionBuilders and
             // ScorerBuilders, but our Clone impls simplify our code here.
             .when(
