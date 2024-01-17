@@ -80,7 +80,7 @@
 //!     mut query: Query<ActionQuery, With<Drink>>,
 //! ) {
 //!     for mut action in query.iter_mut() {
-//!         let Ok(mut thirst) = thirsts.get_mut(action.actor()) {
+//!         let Ok(mut thirst) = thirsts.get_mut(action.actor()) else {
 //!             continue;
 //!         };
 //!

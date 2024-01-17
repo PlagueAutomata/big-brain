@@ -64,8 +64,8 @@ pub struct Thinker {
     picker: Arc<dyn Picker>,
     otherwise: Option<ActionInner>,
     choices: Vec<Choice>,
-    current_action: Option<(Action, ActionInner)>,
-    scheduled_actions: VecDeque<ActionInner>,
+    current: Option<Action>,
+    scheduled: VecDeque<ActionInner>,
 }
 
 impl Thinker {
@@ -87,9 +87,16 @@ impl Thinker {
         ThinkerBuilder::new(FirstToScore { threshold })
     }
 
-    pub fn schedule_action(&mut self, action: impl ActionSpawn + 'static) {
-        self.scheduled_actions
-            .push_back(ActionInner::new(Arc::new(action)));
+    pub fn schedule(&mut self, action: impl ActionSpawn + 'static) {
+        self.scheduled.push_back(Arc::new(action));
+    }
+
+    pub fn has_scheduled(&self) -> bool {
+        !self.scheduled.is_empty()
+    }
+
+    pub fn current(&self) -> Option<Action> {
+        self.current
     }
 }
 
@@ -128,7 +135,7 @@ impl ThinkerBuilder {
     /// Default `Action` to execute if the `Picker` did not pick any of the
     /// given choices.
     pub fn otherwise(mut self, otherwise: impl ActionSpawn + 'static) -> Self {
-        self.idle = Some(ActionInner::new(Arc::new(otherwise)));
+        self.idle = Some(Arc::new(otherwise));
         self
     }
 }
@@ -142,14 +149,14 @@ pub fn thinker_component_attach_system(
 
         let actor = Actor(entity);
 
-        let thinker = cmd.spawn((actor, ActionState::Executing)).id();
+        let thinker = cmd.spawn(actor).id();
 
         let choices = thinker_builder
             .choices
             .iter()
             .map(|ChoiceBuilder { when, then }| {
                 let scorer = when.spawn(ScorerCommands::new(&mut cmd, actor));
-                let action = ActionInner::new(then.clone());
+                let action = then.clone();
                 cmd.add(AddChild {
                     parent: thinker,
                     child: scorer.0,
@@ -163,8 +170,8 @@ pub fn thinker_component_attach_system(
             picker: thinker_builder.picker.clone(),
             otherwise: thinker_builder.idle.clone(),
             choices,
-            current_action: None,
-            scheduled_actions: VecDeque::new(),
+            current: None,
+            scheduled: VecDeque::new(),
         });
 
         cmd.entity(entity).insert(HasThinker(thinker));
@@ -209,139 +216,30 @@ impl HasThinker {
 
 pub fn thinker_system(
     mut cmd: Commands,
-    mut query: Query<(&mut ActionState, &Actor, &mut Thinker)>,
+    mut query: Query<(&Actor, &mut Thinker)>,
     scores: Query<&Score>,
-    mut states: Query<&mut ActionState, Without<Thinker>>,
+    states: Query<&ActionState>,
 ) {
-    use ActionState::*;
-
-    for (mut thinker_state, &actor, mut thinker) in query.iter_mut() {
-        match *thinker_state {
-            Executing => {
-                if let Some(action) = thinker.picker.pick(&thinker.choices, &scores) {
-                    // Think about what action we're supposed to be taking. We do this
-                    // every tick, because we might change our mind.
-                    // ...and then execute it (details below).
-                    thinker.exec_picked_action(&mut cmd, actor, action, &mut states, true);
-                } else if let Some(action) = thinker.schedule(&states) {
-                    let new_action = action.spawn(ActionCommands::new(&mut cmd, actor));
-                    debug!("scheduled {:?}", new_action);
-                    thinker.current_action = Some((new_action, action));
-                } else if let Some(default_action) = thinker.otherwise.clone() {
-                    // Otherwise, let's just execute the default one! (if it's there)
-                    thinker.exec_picked_action(&mut cmd, actor, default_action, &mut states, false);
-                } else if let Some((action, _)) = thinker.current_action.as_ref() {
-                    if states.get(action.entity()).unwrap().is_done() {
-                        debug!("current {:?} is done, despawn", action);
-                        cmd.add(action.despawn_recursive());
-                        thinker.current_action = None;
-                    }
-                }
-            }
-            Cancelled => {
-                debug!("Thinker cancelled. Cleaning up.");
-                if let Some(current) = thinker.current_action.as_ref().map(|(c, _)| *c) {
-                    debug!("Cancelling current action because thinker was cancelled.");
-                    let mut current_state = states.get_mut(current.entity()).unwrap();
-                    match *current_state {
-                        Executing => {
-                            debug!("Action is still executing. Attempting to cancel it before wrapping up Thinker cancellation.\nParent thinker was cancelled. Cancelling action.");
-                            current_state.cancel();
-                        }
-                        Cancelled => debug!("Current action already cancelled."),
-                        Success | Failure => {
-                            debug!("Action already wrapped up on its own. Cleaning up action in Thinker.");
-                            cmd.add(current.despawn_recursive());
-                            thinker.current_action = None;
-                        }
-                    }
-                } else {
-                    debug!("No current thinker action. Wrapping up Thinker as Succeeded.");
-                    thinker_state.success();
-                }
-            }
-            Success | Failure => {}
-        }
-    }
-}
-
-impl Thinker {
-    fn schedule(
-        &mut self,
-        states: &Query<&mut ActionState, Without<Thinker>>,
-    ) -> Option<ActionInner> {
-        if let Some((action, _)) = self.current_action.as_ref() {
-            if !states.get(action.entity()).unwrap().is_done() {
-                return None;
-            }
-        }
-
-        self.scheduled_actions.pop_front()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn exec_picked_action(
-        &mut self,
-        cmd: &mut Commands,
-        actor: Actor,
-        next: ActionInner,
-        states: &mut Query<&mut ActionState, Without<Thinker>>,
-        override_current: bool,
-    ) {
-        // If we do find one, then we need to grab the corresponding
-        // component for it. The "action" that `picker.pick()` returns
-        // is just a newtype for an Entity.
-
-        // Now we check the current action. We need to check if we picked the same one as the previous tick.
-        //
-        // TODO: I don't know where the right place to put this is
-        // (maybe not in this logic), but we do need some kind of
-        // oscillation protection so we're not just bouncing back and
-        // forth between the same couple of actions.
-
-        use ActionState::*;
-
-        if let Some((action, current)) = &self.current_action {
-            let mut current_state = states.get_mut(action.entity()).unwrap();
-            let previous_done = current_state.is_done();
-            if (!current.id_eq(&next) && override_current) || previous_done {
-                // So we've picked a different action than we were
-                // currently executing. Just like before, we grab the
-                // actual Action component (and we assume it exists).
-                // If the action is executing, or was requested, we
-                // need to cancel it to make sure it stops.
-                match *current_state {
-                    Executing => {
-                        debug!("still exec, cancel {:?}", action);
-                        current_state.cancel();
-                    }
-                    Cancelled => {}
-                    Success | Failure => {
-                        debug!("completed, despawning {:?}", action);
-                        cmd.add(action.despawn_recursive());
-
-                        debug!("Spawning next action");
-
-                        let next_action = next.spawn(ActionCommands::new(cmd, actor));
-                        self.current_action = Some((next_action, next));
-                    }
-                };
+    for (&actor, mut thinker) in query.iter_mut() {
+        if let Some(action) = thinker.current() {
+            if states.get(action.entity()).unwrap().is_done() {
+                debug!("current {:?} is done, despawn", action);
+                cmd.add(action.despawn_recursive());
+                thinker.current = None;
             } else {
-                // Otherwise, it turns out we want to keep executing
-                // the same action. Just in case, we go ahead and set
-                // it as requested if for some reason it had finished
-                // but the Action System hasn't gotten around to
-                // cleaning it up.
+                // wait for success or failure
+                continue;
             }
-        } else {
-            // This branch arm is called when there's no
-            // current_action in the thinker. The logic here is pretty
-            // straightforward -- we set the action, Request it, and
-            // that's it.
-            debug!("No current action. Spawning new action.");
+        }
 
-            let next_action = next.spawn(ActionCommands::new(cmd, actor));
-            self.current_action = Some((next_action, next));
+        let next_action = thinker.scheduled.pop_front();
+        let next_action = next_action.or_else(|| thinker.picker.pick(&thinker.choices, &scores));
+        let next_action = next_action.or_else(|| thinker.otherwise.clone());
+
+        if let Some(action) = next_action {
+            let new_action = action.spawn(ActionCommands::new(&mut cmd, actor));
+            debug!("next {:?}", new_action);
+            thinker.current = Some(new_action);
         }
     }
 }

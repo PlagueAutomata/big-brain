@@ -56,7 +56,7 @@ pub fn thirst_system(
             let thinker_ent = has_thinkers.get(actor).unwrap().entity();
             let mut thinker = thinkers.get_mut(thinker_ent).unwrap();
             debug!("Scheduling one-off action");
-            thinker.schedule_action(OneOff);
+            thinker.schedule(OneOff);
             thirst.thirst = 0.0;
         }
         trace!("Thirst: {}", thirst.thirst);

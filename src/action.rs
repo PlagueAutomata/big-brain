@@ -132,29 +132,7 @@ impl ActionState {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub(crate) struct ActionId;
-
-#[derive(Clone)]
-pub struct ActionInner {
-    id: Arc<ActionId>,
-    builder: Arc<dyn ActionSpawn>,
-}
-
-impl ActionInner {
-    pub(crate) fn new(builder: Arc<dyn ActionSpawn>) -> Self {
-        let id = Arc::new(ActionId);
-        Self { id, builder }
-    }
-
-    pub(crate) fn id_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.id, &other.id)
-    }
-
-    pub(crate) fn spawn(&self, cmd: ActionCommands) -> Action {
-        self.builder.spawn(cmd)
-    }
-}
+pub type ActionInner = Arc<dyn ActionSpawn>;
 
 /// Trait that must be defined by types in order to be `ActionBuilder`s.
 /// `ActionBuilder`s' job is to spawn new `Action` entities on demand. In
