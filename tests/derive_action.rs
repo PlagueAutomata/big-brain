@@ -1,12 +1,10 @@
-// use bevy::prelude::*;
-// use big_brain::prelude::*;
+use bevy::prelude::*;
+use big_brain::*;
 
-// #[derive(Debug, Clone, Component, ActionBuilder)]
-// #[action_label = "MyLabel"]
-// pub struct MyAction;
+#[derive(Debug, Clone, Component, ActionSpawn)]
+pub struct MyAction;
 
-// #[test]
-// fn check_macro() {
-//     let action = MyAction;
-//     assert_eq!(action.label(), Some("MyLabel"))
-// }
+#[test]
+fn check_macro() {
+    let _action: &dyn ActionSpawn = &MyAction;
+}

@@ -4,7 +4,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::utils::tracing::debug;
-use big_brain::prelude::*;
+use big_brain::*;
 
 // Lets define a custom measure. There are quite a few built-in ones in big-brain,
 // so we'll create a slightly useless Measure that sums together the weighted scores,
@@ -146,11 +146,9 @@ pub fn craving_food_scorer<
 }
 
 // Let's set up our world
-pub fn init_entities(mut cmd: Commands) {
-    cmd.spawn((
-        Pancakes(50.0),
-        Waffles(50.0),
-        Thinker::build(FirstToScore::new(0.5))
+pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
+    let thinker = thinkers.add(
+        ThinkerSpawner::first_to_score(0.5)
             // we use our custom measure here. The impact of the custom measure is that the
             // pancakes should be down-weighted. This means despite this being listed first,
             // all things being equal we should consume pancakes before waffles.
@@ -169,7 +167,9 @@ pub fn init_entities(mut cmd: Commands) {
                 MeasuredScorer::measure(0.1, ((CravingPancakes, 1.0), (CravingWaffles, 1.0))),
                 EatPancakes,
             ),
-    ));
+    );
+
+    cmd.spawn((Pancakes(50.0), Waffles(50.0), thinker));
 }
 
 fn main() {
@@ -181,7 +181,7 @@ fn main() {
             filter: "big_brain=debug,custom_measure=debug".to_string(),
             ..default()
         }))
-        .add_plugins(BigBrainPlugin::new(PreUpdate))
+        .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
         .add_systems(Startup, init_entities)
         .add_systems(Update, eat_dessert)
         .add_systems(

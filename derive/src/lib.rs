@@ -14,8 +14,8 @@ pub fn action_builder_derive(input: proc_macro::TokenStream) -> proc_macro::Toke
     let turbofish = ty_generics.as_turbofish();
 
     let gen = quote! {
-        impl #impl_generics ::big_brain::action::ActionSpawn for #component_name #ty_generics #where_clause {
-            fn spawn(&self, mut cmd: ::big_brain::action::ActionCommands) -> ::big_brain::action::Action {
+        impl #impl_generics ::big_brain::ActionSpawn for #component_name #ty_generics #where_clause {
+            fn spawn(&self, mut cmd: ::big_brain::ActionCommands) -> ::big_brain::Action {
                 cmd.spawn(#component_name #turbofish ::clone(self))
             }
         }
@@ -34,8 +34,8 @@ pub fn scorer_builder_derive(input: proc_macro::TokenStream) -> proc_macro::Toke
     let turbofish = ty_generics.as_turbofish();
 
     let gen = quote! {
-        impl #impl_generics ::big_brain::scorer::ScorerSpawn for #component_name #ty_generics #where_clause {
-            fn spawn(&self, mut cmd: ::big_brain::scorer::ScorerCommands) -> ::big_brain::scorer::Scorer {
+        impl #impl_generics ::big_brain::ScorerSpawn for #component_name #ty_generics #where_clause {
+            fn spawn(&self, mut cmd: ::big_brain::ScorerCommands) -> ::big_brain::Scorer {
                 cmd.spawn(#component_name #turbofish ::clone(self))
             }
         }

@@ -3,7 +3,16 @@
 //! built-in Composite Scorers.
 
 use crate::thinker::Actor;
-use bevy::{ecs::query::WorldQuery, prelude::*, utils::all_tuples};
+use bevy_ecs::{
+    bundle::Bundle,
+    component::Component,
+    entity::Entity,
+    query::{With, WorldQuery},
+    system::{Commands, Query},
+};
+use bevy_hierarchy::{AddChild, Children};
+use bevy_reflect::Reflect;
+use bevy_utils::all_tuples;
 use std::sync::Arc;
 
 pub struct ScorerCommands<'w, 's, 'a> {
@@ -150,19 +159,39 @@ impl<'w> ScorerQueryReadOnlyItem<'w> {
     }
 }
 
-/// Scorer that always returns the same, fixed score.
-/// Good for combining with things creatively!
+/// Scorer that always returns minimal valid score (f32::MIN_POSITIVE).
 #[derive(Clone, Component)]
-pub struct FixedScore(pub f32);
+pub struct IdleScorer;
 
-impl ScorerSpawn for FixedScore {
+impl ScorerSpawn for IdleScorer {
     fn spawn(&self, mut cmd: ScorerCommands) -> Scorer {
         cmd.spawn(self.clone())
     }
 }
 
-pub fn fixed_score_system(mut query: Query<(&mut Score, &FixedScore)>) {
-    for (mut score, &FixedScore(fixed)) in query.iter_mut() {
+pub fn idle_scorer_system(mut query: Query<&mut Score, With<IdleScorer>>) {
+    for mut score in query.iter_mut() {
+        score.set(f32::MIN_POSITIVE);
+    }
+}
+
+/// Scorer that always returns the same, fixed score.
+/// Good for combining with things creatively!
+#[derive(Clone, Component)]
+pub struct FixedScorer(pub f32);
+
+impl FixedScorer {
+    pub const IDLE: Self = FixedScorer(f32::MIN_POSITIVE);
+}
+
+impl ScorerSpawn for FixedScorer {
+    fn spawn(&self, mut cmd: ScorerCommands) -> Scorer {
+        cmd.spawn(self.clone())
+    }
+}
+
+pub fn fixed_scorer_system(mut query: Query<(&mut Score, &FixedScorer)>) {
+    for (mut score, &FixedScorer(fixed)) in query.iter_mut() {
         score.set(fixed);
     }
 }
@@ -175,7 +204,7 @@ pub fn fixed_score_system(mut query: Query<(&mut Score, &FixedScore)>) {
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use big_brain::prelude::*;
+/// # use big_brain::*;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
 /// # struct MyScorer;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
@@ -183,7 +212,7 @@ pub fn fixed_score_system(mut query: Query<(&mut Score, &FixedScore)>) {
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
 /// # struct MyAction;
 /// # fn main() {
-/// Thinker::build(Highest)
+/// ThinkerSpawner::highest(0.0)
 ///     .when(AllOrNothing::build(0.8, (MyScorer, MyOtherScorer)), MyAction);
 /// # ;
 /// # }
@@ -224,7 +253,7 @@ pub fn all_or_nothing_system(
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use big_brain::prelude::*;
+/// # use big_brain::*;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
 /// # struct MyScorer;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
@@ -232,7 +261,7 @@ pub fn all_or_nothing_system(
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
 /// # struct MyAction;
 /// # fn main() {
-/// Thinker::build(Highest)
+/// ThinkerSpawner::highest(0.0)
 ///     .when(SumOfScorers::build(0.8, (MyScorer, MyOtherScorer)), MyAction)
 /// # ;
 /// # }
@@ -277,7 +306,7 @@ pub fn sum_of_scorers_system(
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use big_brain::prelude::*;
+/// # use big_brain::*;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
 /// # struct MyScorer;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
@@ -285,7 +314,7 @@ pub fn sum_of_scorers_system(
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
 /// # struct MyAction;
 /// # fn main() {
-/// Thinker::build(Highest)
+/// ThinkerSpawner::highest(0.0)
 ///     .when(ProductOfScorers::build(0.5, (MyScorer, MyOtherScorer)), MyAction)
 /// # ;
 /// # }
@@ -368,7 +397,7 @@ pub fn compensated_product_of_scorers_system(
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use big_brain::prelude::*;
+/// # use big_brain::*;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
 /// # struct MyScorer;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
@@ -376,12 +405,11 @@ pub fn compensated_product_of_scorers_system(
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
 /// # struct MyAction;
 /// # fn main() {
-/// Thinker::build(Highest)
+/// ThinkerSpawner::highest(0.0)
 ///     .when(WinningScorer::build(0.8, (MyScorer, MyOtherScorer)), MyAction)
 /// # ;
 /// # }
 /// ```
-
 #[derive(Component, Clone)]
 pub struct WinningScorer {
     threshold: f32,

@@ -9,7 +9,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::utils::tracing::{debug, trace};
-use big_brain::prelude::*;
+use big_brain::*;
 
 /// First, we make a simple Position component.
 #[derive(Component, Debug, Copy, Clone)]
@@ -225,7 +225,7 @@ pub fn thirsty_scorer_system(
     }
 }
 
-pub fn init_entities(mut cmd: Commands) {
+pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
     // Spawn two water sources.
     cmd.spawn((
         WaterSource,
@@ -258,14 +258,13 @@ pub fn init_entities(mut cmd: Commands) {
 
     // Build the thinker
     // We don't do anything unless we're thirsty enough.
-    let thinker = Thinker::build(FirstToScore { threshold: 0.8 }).when(Thirsty, move_and_drink);
 
     cmd.spawn((
         Thirst::new(75.0, 2.0),
         Position {
             position: Vec2::new(0.0, 0.0),
         },
-        thinker,
+        thinkers.add(ThinkerSpawner::first_to_score(0.8).when(Thirsty, move_and_drink)),
     ));
 }
 
@@ -277,7 +276,7 @@ fn main() {
             filter: "big_brain=debug,sequence=debug".to_string(),
             ..default()
         }))
-        .add_plugins(BigBrainPlugin::new(PreUpdate))
+        .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
         .add_systems(Startup, init_entities)
         .add_systems(Update, thirst_system)
         .add_systems(

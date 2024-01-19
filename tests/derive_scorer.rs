@@ -1,14 +1,10 @@
-// use bevy::prelude::*;
-// use big_brain::prelude::*;
+use bevy::prelude::*;
+use big_brain::*;
 
-// #[derive(Debug, Clone, Component, ScorerBuilder)]
-// #[scorer_label = "MyLabel"]
-// pub struct MyScorer;
+#[derive(Debug, Clone, Component, ScorerSpawn)]
+pub struct MyScorer;
 
-// #[test]
-// fn check_macro() {
-//     // TODO: how to make sure that the struct implements Component and Clone?
-
-//     let scorer = MyScorer;
-//     assert_eq!(scorer.label(), Some("MyLabel"))
-// }
+#[test]
+fn check_macro() {
+    let _scorer: &dyn ScorerSpawn = &MyScorer;
+}

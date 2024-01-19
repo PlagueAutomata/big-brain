@@ -3,7 +3,13 @@
 //!  * weight score.
 
 use crate::scorer::{Score, Scorer, ScorerCommands, ScorerSpawn};
-use bevy::{prelude::*, utils::all_tuples};
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    system::{Local, Query},
+};
+use bevy_hierarchy::Children;
+use bevy_utils::all_tuples;
 use std::sync::Arc;
 
 pub trait WeightnedScorersList {
@@ -78,7 +84,7 @@ pub fn weighted_measure(scores: &[WeightedScore]) -> f32 {
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use big_brain::prelude::*;
+/// # use big_brain::*;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
 /// # struct MyScorer;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
@@ -86,7 +92,7 @@ pub fn weighted_measure(scores: &[WeightedScore]) -> f32 {
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
 /// # struct MyAction;
 /// # fn main() {
-/// Thinker::build(Highest)
+/// ThinkerSpawner::highest(0.0)
 ///     .when(
 ///         MeasuredScorer::chebyshev(0.5, (
 ///             (MyScorer, 0.8),
@@ -125,7 +131,7 @@ impl MeasuredScorer {
         measure: Measure,
         scorers: B,
     ) -> impl ScorerSpawn {
-        MeasuredScorerBuilder {
+        MeasuredScorerSpawner {
             threshold,
             measure,
             scorers: B::build(scorers),
@@ -133,13 +139,13 @@ impl MeasuredScorer {
     }
 }
 
-pub struct MeasuredScorerBuilder {
+pub struct MeasuredScorerSpawner {
     threshold: f32,
     measure: Measure,
     scorers: Vec<(Arc<dyn ScorerSpawn>, f32)>,
 }
 
-impl ScorerSpawn for MeasuredScorerBuilder {
+impl ScorerSpawn for MeasuredScorerSpawner {
     fn spawn(&self, mut cmd: ScorerCommands) -> Scorer {
         let scorer = cmd.spawn(MeasuredScorer {
             threshold: self.threshold,

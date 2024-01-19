@@ -1,7 +1,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::utils::tracing::{debug, trace};
-use big_brain::prelude::*;
+use big_brain::*;
 
 #[derive(Clone, Component, Debug, ActionSpawn)]
 struct OneOff;
@@ -22,13 +22,12 @@ fn one_off_action_system(mut query: Query<ActionQuery, With<OneOff>>) {
     }
 }
 
-pub fn init_entities(mut cmd: Commands) {
+pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
+    let thinker = thinkers.add(ThinkerSpawner::first_to_score(0.8));
+
     // You at least need to have a Thinker in order to schedule one-off
     // actions. It's not a general-purpose task scheduler.
-    cmd.spawn((
-        Thirst::new(75.0, 2.0),
-        Thinker::build(FirstToScore { threshold: 0.8 }),
-    ));
+    cmd.spawn((Thirst::new(75.0, 2.0), thinker));
 }
 
 #[derive(Component, Debug)]
@@ -72,7 +71,7 @@ fn main() {
             filter: "big_brain=debug,one_off=debug".to_string(),
             ..default()
         }))
-        .add_plugins(BigBrainPlugin::new(PreUpdate))
+        .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
         .add_systems(Startup, init_entities)
         .add_systems(Update, thirst_system)
         // Big Brain has specific sets for Scorers and Actions. If

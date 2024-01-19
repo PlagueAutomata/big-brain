@@ -3,9 +3,9 @@ use bevy::{
     log::{Level, LogPlugin},
     prelude::*,
 };
-use big_brain::prelude::{
+use big_brain::{
     Action, ActionCommands, ActionSpawn, ActionState, Actor, BigBrainPlugin, BigBrainSet,
-    FirstToScore, Score, Scorer, ScorerCommands, ScorerSpawn, Sequence, Thinker,
+    FixedScorer, Score, Scorer, ScorerCommands, ScorerSpawn, Sequence, ThinkerSpawner,
 };
 
 #[test]
@@ -13,39 +13,44 @@ fn steps() {
     App::new()
         .add_plugins((
             MinimalPlugins,
+            AssetPlugin::default(),
             LogPlugin {
                 level: Level::TRACE,
                 ..default()
             },
-            BigBrainPlugin::new(PreUpdate),
+            BigBrainPlugin::new(Update, Update, PostUpdate, Last),
         ))
         .init_resource::<FailState>()
         .add_systems(Startup, setup)
-        .add_systems(Update, no_failure_score.before(BigBrainSet::Scorers))
+        .add_systems(First, || trace!("-------------------"))
         .add_systems(
-            PreUpdate,
-            (mock_action, failure_action, exit_action).in_set(BigBrainSet::Actions),
+            Update,
+            (
+                no_failure_score.in_set(BigBrainSet::Scorers),
+                (mock_action, failure_action, exit_action).in_set(BigBrainSet::Actions),
+            ),
         )
-        .add_systems(Last, last.before(BigBrainSet::Cleanup))
         .run();
 
     error!("end");
-
-    fn last() {
-        trace!("-------------------");
-    }
 }
 
-fn setup(mut cmds: Commands) {
-    cmds.spawn(
-        Thinker::build(FirstToScore::new(0.5))
+fn setup(mut cmds: Commands, mut builders: ResMut<Assets<ThinkerSpawner>>) {
+    let handle = builders.add(
+        ThinkerSpawner::first_to_score(0.0)
             .when(NoFailureScorer, Sequence::step(FailureAction))
-            .otherwise(Sequence::step((
-                MockAction::new("A_action"),
-                MockAction::new("B_action"),
-                ExitAction,
-            ))),
+            .when(
+                FixedScorer::IDLE,
+                Sequence::step((
+                    MockAction::new("A_action"),
+                    MockAction::new("B_action"),
+                    MockAction::new("C_action"),
+                    MockAction::new("D_action"),
+                    ExitAction,
+                )),
+            ),
     );
+    cmds.spawn(handle);
 }
 
 #[derive(Component, Clone)]
@@ -64,13 +69,13 @@ impl MockAction {
 impl ActionSpawn for MockAction {
     fn spawn(&self, mut cmd: ActionCommands) -> Action {
         let action = cmd.spawn(self.clone());
-        info!("spawned {} as {:?}", self.label, action);
+        info!("{} spawned as {:?}", self.label, action);
         action
     }
 }
 
-fn mock_action(mut query: Query<(&Actor, &mut ActionState, &MockAction)>) {
-    for (_actor, mut state, this) in query.iter_mut() {
+fn mock_action(mut query: Query<(Entity, &Actor, &mut ActionState, &MockAction)>) {
+    for (entity, _actor, mut state, this) in query.iter_mut() {
         let prev_state = state.clone();
 
         match prev_state {
@@ -79,7 +84,10 @@ fn mock_action(mut query: Query<(&Actor, &mut ActionState, &MockAction)>) {
             ActionState::Success | ActionState::Failure => (),
         }
 
-        info!("{}: {:?} -> {:?}", this.label, prev_state, *state);
+        info!(
+            "{} {:?}: {:?} -> {:?}",
+            this.label, entity, prev_state, *state
+        );
     }
 }
 
@@ -106,20 +114,22 @@ fn exit_action(
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct FailureAction;
 
 impl ActionSpawn for FailureAction {
     fn spawn(&self, mut cmd: ActionCommands) -> Action {
-        cmd.spawn(Self)
+        let action = cmd.spawn(self.clone());
+        info!("FailureAction spawned as {:?}", action);
+        action
     }
 }
 
 fn failure_action(
-    mut query: Query<(&Actor, &mut ActionState), With<FailureAction>>,
+    mut query: Query<(Entity, &Actor, &mut ActionState), With<FailureAction>>,
     mut global_state: ResMut<FailState>,
 ) {
-    for (_actor, mut state) in query.iter_mut() {
+    for (entity, _actor, mut state) in query.iter_mut() {
         global_state.failure |= state.is_executing();
 
         let prev_state = state.clone();
@@ -128,7 +138,10 @@ fn failure_action(
             ActionState::Cancelled => panic!("wtf?"),
             ActionState::Success | ActionState::Failure => (),
         }
-        info!("FailureAction: {:?} -> {:?}", prev_state, *state);
+        info!(
+            "FailureAction {:?}: {:?} -> {:?}",
+            entity, prev_state, *state
+        );
     }
 }
 
@@ -148,6 +161,8 @@ impl ScorerSpawn for NoFailureScorer {
 
 fn no_failure_score(state: Res<FailState>, mut query: Query<&mut Score, With<NoFailureScorer>>) {
     for mut score in query.iter_mut() {
-        score.set(if state.failure { 0.0 } else { 1.0 });
+        let result = if state.failure { 0.0 } else { 1.0 };
+        info!("NoFailureScorer: {:?}", result);
+        score.set(result);
     }
 }

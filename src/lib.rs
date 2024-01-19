@@ -41,7 +41,7 @@
 //!
 //! ```rust
 //! use bevy::prelude::*;
-//! use big_brain::prelude::*;
+//! use big_brain::*;
 //! # #[derive(Component, Debug)]
 //! # struct Thirst { thirst: f32 }
 //!
@@ -68,7 +68,7 @@
 //!
 //! ```rust
 //! use bevy::prelude::*;
-//! use big_brain::prelude::*;
+//! use big_brain::*;
 //! # #[derive(Component, Debug)]
 //! # struct Thirst { thirst: f32 }
 //!
@@ -103,18 +103,17 @@
 //!
 //! ```rust
 //! # use bevy::prelude::*;
-//! # use big_brain::prelude::*;
+//! # use big_brain::*;
 //! # #[derive(Debug, Component)]
 //! # struct Thirst(f32, f32);
 //! # #[derive(Debug, Clone, Component, ScorerSpawn)]
 //! # struct Thirsty;
 //! # #[derive(Debug, Clone, Component, ActionSpawn)]
 //! # struct Drink;
-//! fn spawn_entity(cmd: &mut Commands) {
+//! fn spawn_entity(cmd: &mut Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
 //!     cmd.spawn((
 //!         Thirst(70.0, 2.0),
-//!         Thinker::build(FirstToScore { threshold: 0.8 })
-//!             .when(Thirsty, Drink),
+//!         thinkers.add(ThinkerSpawner::first_to_score(0.8).when(Thirsty, Drink)),
 //!     ));
 //! }
 //! ```
@@ -125,7 +124,7 @@
 //!
 //! ```no_run
 //! # use bevy::prelude::*;
-//! # use big_brain::prelude::*;
+//! # use big_brain::*;
 //! # fn init_entities() {}
 //! # fn thirst_system() {}
 //! # fn drink_action_system() {}
@@ -133,7 +132,7 @@
 //! fn main() {
 //!     App::new()
 //!         .add_plugins(DefaultPlugins)
-//!         .add_plugins(BigBrainPlugin::new(PreUpdate))
+//!         .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
 //!         .add_systems(Startup, init_entities)
 //!         .add_systems(Update, thirst_system)
 //!         .add_systems(PreUpdate, drink_action_system.in_set(BigBrainSet::Actions))
@@ -170,95 +169,88 @@
 //!
 //! This project is licensed under [the Apache-2.0 License](LICENSE.md).
 
-pub mod action;
-pub mod evaluator;
-pub mod measures;
-pub mod pickers;
-pub mod scorer;
-pub mod sequence;
-pub mod thinker;
+mod action;
+mod evaluator;
+mod measures;
+mod pickers;
+mod scorer;
+mod sequence;
+mod thinker;
 
-pub mod prelude {
-    //! Convenience module with the core types you're most likely to use when working with Big Brain.
-    //! Mean to be used like `use big_brain::prelude::*;`
+// //! Convenience module with the core types you're most likely to use when working with Big Brain.
+// //! Mean to be used like `use big_brain::*;`
 
-    pub use big_brain_derive::{ActionSpawn, ScorerSpawn};
+pub use big_brain_derive::{ActionSpawn, ScorerSpawn};
 
-    pub use crate::{
-        action::{Action, ActionCommands, ActionQuery, ActionSpawn, ActionState},
-        evaluator::{
-            EvaluatingScorer, Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator,
-        },
-        measures::{Measure, MeasuredScorer, WeightedScore},
-        pickers::{FirstToScore, Highest, Picker},
-        scorer::{
-            AllOrNothing, FixedScore, ProductOfScorers, Score, Scorer, ScorerCommands, ScorerQuery,
-            ScorerSpawn, ScorerSpawner, SumOfScorers, WinningScorer,
-        },
-        sequence::{Sequence, SequenceMode},
-        thinker::{Actor, HasThinker, Thinker, ThinkerBuilder},
-        BigBrainPlugin, BigBrainSet,
-    };
-}
+pub use crate::{
+    action::{Action, ActionCommands, ActionQuery, ActionSpawn, ActionState},
+    evaluator::{EvaluatingScorer, Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator},
+    measures::{Measure, MeasuredScorer, WeightedScore},
+    pickers::{FirstToScore, Highest, Picker},
+    scorer::{
+        AllOrNothing, CompensatedProductOfScorers, FixedScorer, ProductOfScorers, Score, Scorer,
+        ScorerCommands, ScorerQuery, ScorerSpawn, ScorerSpawner, SumOfScorers, WinningScorer,
+    },
+    sequence::{Sequence, SequenceMode, SequenceSpawner},
+    thinker::{Actor, HasThinker, Thinker, ThinkerSpawner},
+};
 
-use bevy::{ecs::schedule::ScheduleLabel, prelude::*, utils::intern::Interned};
+use bevy_app::{App, Plugin};
+use bevy_asset::AssetApp;
+use bevy_ecs::schedule::{IntoSystemConfigs, ScheduleLabel, SystemSet};
+use bevy_utils::intern::Interned;
 
 /// Core [`Plugin`] for Big Brain behavior. Required for any of the
-/// [`Thinker`](thinker::Thinker)-related magic to work.
+/// [`Thinker`]-related magic to work.
 ///
 /// ### Example
 ///
 /// ```no_run
 /// use bevy::prelude::*;
-/// use big_brain::prelude::*;
+/// use big_brain::*;
 ///
 /// App::new()
-///     .add_plugins((DefaultPlugins, BigBrainPlugin::new(PreUpdate)))
+///     .add_plugins((DefaultPlugins, BigBrainPlugin::new(Update, Update, PostUpdate, Last)))
 ///     // ...insert entities and other systems.
 ///     .run();
-#[derive(Debug, Clone, Reflect)]
-#[reflect(from_reflect = false)]
+#[derive(Debug, Clone)]
 pub struct BigBrainPlugin {
-    #[reflect(ignore)]
-    schedule: Interned<dyn ScheduleLabel>,
-    #[reflect(ignore)]
-    cleanup_schedule: Interned<dyn ScheduleLabel>,
+    scorers: Interned<dyn ScheduleLabel>,
+    actions: Interned<dyn ScheduleLabel>,
+    sequence: Interned<dyn ScheduleLabel>,
+    thinker: Interned<dyn ScheduleLabel>,
 }
 
 impl BigBrainPlugin {
-    /// Create the BigBrain plugin which runs the scorers, thinker and actions in the specified
-    /// schedule
-    pub fn new(schedule: impl ScheduleLabel) -> Self {
+    /// Create the BigBrain plugin which runs the scorers,
+    /// thinker and actions in the specified schedule
+    pub fn new(
+        scorers: impl ScheduleLabel,
+        actions: impl ScheduleLabel,
+        sequence: impl ScheduleLabel,
+        thinker: impl ScheduleLabel,
+    ) -> Self {
         Self {
-            schedule: schedule.intern(),
-            cleanup_schedule: Last.intern(),
+            scorers: scorers.intern(),
+            actions: actions.intern(),
+            sequence: sequence.intern(),
+            thinker: thinker.intern(),
         }
-    }
-
-    /// Overwrite the Schedule that is used to run cleanup tasks. By default this happens in Last.
-    pub fn set_cleanup_schedule(mut self, cleanup_schedule: impl ScheduleLabel) -> Self {
-        self.cleanup_schedule = cleanup_schedule.intern();
-        self
     }
 }
 
 impl Plugin for BigBrainPlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(
-            self.schedule.intern(),
-            (
-                BigBrainSet::Scorers,
-                BigBrainSet::Actions,
-                BigBrainSet::Thinkers,
-            )
-                .chain(),
-        )
-        .configure_sets(self.cleanup_schedule.intern(), BigBrainSet::Cleanup)
-        .add_systems(
-            self.schedule.intern(),
-            (
+        app.init_asset::<crate::thinker::ThinkerSpawner>()
+            .configure_sets(self.scorers.intern(), BigBrainSet::Scorers)
+            .configure_sets(self.actions.intern(), BigBrainSet::Actions)
+            .configure_sets(self.sequence.intern(), BigBrainSet::Sequence)
+            .configure_sets(self.thinker.intern(), BigBrainSet::Thinker)
+            .add_systems(
+                self.scorers.intern(),
                 (
-                    crate::scorer::fixed_score_system,
+                    crate::scorer::idle_scorer_system,
+                    crate::scorer::fixed_scorer_system,
                     crate::measures::measured_scorers_system,
                     crate::scorer::all_or_nothing_system,
                     crate::scorer::sum_of_scorers_system,
@@ -266,45 +258,36 @@ impl Plugin for BigBrainPlugin {
                     crate::scorer::compensated_product_of_scorers_system,
                     crate::scorer::winning_scorer_system,
                     crate::evaluator::evaluating_scorer_system,
-                ),
-                apply_deferred,
+                )
+                    .in_set(BigBrainSet::Scorers),
             )
-                .chain()
-                .in_set(BigBrainSet::Scorers),
-        )
-        .add_systems(
-            self.schedule.intern(),
-            (
-                apply_deferred,
-                crate::sequence::sequence_system,
-                apply_deferred,
-                crate::thinker::thinker_system,
+            .add_systems(
+                self.sequence,
+                crate::sequence::sequence_system.in_set(BigBrainSet::Sequence),
             )
-                .chain()
-                .in_set(BigBrainSet::Thinkers),
-        )
-        .add_systems(
-            self.cleanup_schedule.intern(),
-            (
-                crate::thinker::thinker_component_attach_system,
-                crate::thinker::thinker_component_detach_system,
-                crate::thinker::actor_gone_cleanup,
-            )
-                .in_set(BigBrainSet::Cleanup),
-        );
+            .add_systems(
+                self.scorers.intern(),
+                (
+                    crate::thinker::thinker_maintain_system,
+                    crate::thinker::thinker_system,
+                    crate::thinker::actor_gone_cleanup,
+                )
+                    .chain()
+                    .in_set(BigBrainSet::Thinker),
+            );
     }
 }
 
 /// [`BigBrainPlugin`] system sets. Use these to schedule your own
 /// actions/scorers/etc.
-#[derive(Clone, Debug, Hash, Eq, PartialEq, SystemSet, Reflect)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq, SystemSet)]
 pub enum BigBrainSet {
     /// Scorers are evaluated in this set.
     Scorers,
     /// Actions are executed in this set.
     Actions,
+    /// Sequence are executed in this set.
+    Sequence,
     /// Thinkers run their logic in this set.
-    Thinkers,
-    /// Various internal cleanup items run in this final set.
-    Cleanup,
+    Thinker,
 }

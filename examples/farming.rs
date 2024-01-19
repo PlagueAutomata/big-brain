@@ -2,7 +2,7 @@
 
 use bevy::{log::LogPlugin, prelude::*};
 use bevy_scene_hook::{HookPlugin, HookedSceneBundle, SceneHook};
-use big_brain::prelude::*;
+use big_brain::*;
 
 const DEFAULT_COLOR: Color = Color::BLACK;
 const SLEEP_COLOR: Color = Color::RED;
@@ -339,6 +339,7 @@ fn update_ui(actor_query: Query<(&Inventory, &Fatigue)>, mut text_query: Query<T
 fn init_entities(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    mut thinkers: ResMut<Assets<ThinkerSpawner>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -401,6 +402,13 @@ fn init_entities(
     let move_and_farm = Sequence::step((MoveToNearest::<Field>::new(1.0), farm));
     let move_and_sell = Sequence::step((MoveToNearest::<Market>::new(1.0), sell));
 
+    let thinker = thinkers.add(
+        ThinkerSpawner::first_to_score(0.6)
+            .when(FatigueScorer, move_and_sleep)
+            .when(WorkNeedScorer, move_and_farm)
+            .when(SellNeedScorer, move_and_sell),
+    );
+
     commands.spawn((
         Name::new("Farmer"),
         PbrBundle {
@@ -422,10 +430,7 @@ fn init_entities(
             money: 0,
             items: 0.0,
         },
-        Thinker::first_to_score(0.6)
-            .when(FatigueScorer, move_and_sleep)
-            .when(WorkNeedScorer, move_and_farm)
-            .when(SellNeedScorer, move_and_sell),
+        thinker,
     ));
 
     // scoreboard
@@ -471,7 +476,7 @@ fn main() {
         .register_type::<Fatigue>()
         .register_type::<Inventory>()
         .add_plugins(HookPlugin)
-        .add_plugins(BigBrainPlugin::new(PreUpdate))
+        .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
         .add_systems(Startup, init_entities)
         .add_systems(Update, (fatigue_system, update_ui))
         .add_systems(

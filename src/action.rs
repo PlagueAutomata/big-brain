@@ -1,11 +1,27 @@
 //! Defines Action-related functionality. This module includes the
-//! ActionBuilder trait and some Composite Actions for utility.
+//! [`ActionSpawn`] trait and some Composite Actions for utility.
+
 use crate::thinker::Actor;
-use bevy::{ecs::query::WorldQuery, prelude::*, utils::all_tuples};
+use bevy_ecs::{
+    bundle::Bundle,
+    component::Component,
+    entity::{Entity, EntityMapper, MapEntities},
+    query::WorldQuery,
+    system::Commands,
+};
+use bevy_hierarchy::{AddChild, DespawnRecursive};
+use bevy_reflect::Reflect;
+use bevy_utils::all_tuples;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, Reflect)]
 pub struct Action(pub(crate) Entity);
+
+impl MapEntities for Action {
+    fn map_entities(&mut self, entity_mapper: &mut EntityMapper) {
+        self.0 = entity_mapper.get_or_reserve(self.0);
+    }
+}
 
 impl Action {
     pub fn entity(&self) -> Entity {
@@ -132,14 +148,12 @@ impl ActionState {
     }
 }
 
-pub type ActionInner = Arc<dyn ActionSpawn>;
-
-/// Trait that must be defined by types in order to be `ActionBuilder`s.
-/// `ActionBuilder`s' job is to spawn new `Action` entities on demand. In
+/// Trait that must be defined by types in order to be [`ActionSpawn`]s.
+/// [`ActionSpawn`]s' job is to spawn new `Action` entities on demand. In
 /// general, most of this is already done for you, and the only method you
 /// really have to implement is `.build()`.
 ///
-/// The `build()` method MUST be implemented for any `ActionBuilder`s you want
+/// The `build()` method MUST be implemented for any [`ActionSpawn`]s you want
 /// to define.
 pub trait ActionSpawn: Send + Sync {
     //  /// MUST insert your concrete Action component into the Scorer [`Entity`],
@@ -157,7 +171,7 @@ pub trait ActionSpawn: Send + Sync {
     //  ///
     //  /// ```
     //  /// # use bevy::prelude::*;
-    //  /// # use big_brain::prelude::*;
+    //  /// # use big_brain::*;
     //  /// #[derive(Debug, Clone, Component, ActionBuilder)]
     //  /// #[action_label = "MyActionLabel"] // Optional. Defaults to type name.
     //  /// struct MyAction;
@@ -167,7 +181,7 @@ pub trait ActionSpawn: Send + Sync {
     //  ///
     //  /// ```
     //  /// # use bevy::prelude::*;
-    //  /// # use big_brain::prelude::*;
+    //  /// # use big_brain::*;
     //  /// #[derive(Debug)]
     //  /// struct MyBuilder;
     //  /// #[derive(Debug, Component)]
@@ -181,7 +195,7 @@ pub trait ActionSpawn: Send + Sync {
     //  /// ```
     //  //fn build(&self, cmd: &mut Commands, action: Entity, actor: Entity);
 
-    /// Spawns a new Action Component, using the given ActionBuilder. This is
+    /// Spawns a new Action Component, using the given ActionSpawn. This is
     /// useful when you're doing things like writing composite Actions.
     fn spawn(&self, cmd: ActionCommands) -> Action;
 }

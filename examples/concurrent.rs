@@ -7,7 +7,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::utils::tracing::debug;
-use big_brain::prelude::*;
+use big_brain::*;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
@@ -68,7 +68,7 @@ pub fn dummy_scorer_system(mut query: Query<ScorerQuery, With<DummyScorer>>) {
     }
 }
 
-pub fn init_entities(mut cmd: Commands) {
+pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
     let number_to_guess: u8 = 5;
 
     // We use the Race struct to build a composite action that will try to guess
@@ -96,7 +96,7 @@ pub fn init_entities(mut cmd: Commands) {
 
     // Build the thinker
     // always select the action with the highest score
-    let thinker = Thinker::build(Highest).when(DummyScorer, steps_guess_numbers);
+    let thinker = thinkers.add(ThinkerSpawner::highest(0.0).when(DummyScorer, steps_guess_numbers));
 
     cmd.spawn(thinker);
 }
@@ -109,7 +109,7 @@ fn main() {
             filter: "big_brain=warn,concurrent=debug".to_string(),
             ..default()
         }))
-        .add_plugins(BigBrainPlugin::new(PreUpdate))
+        .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
         .add_systems(Startup, init_entities)
         .add_systems(
             PreUpdate,

@@ -1,7 +1,7 @@
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::utils::tracing::{debug, trace};
-use big_brain::prelude::*;
+use big_brain::*;
 
 // First, we define a "Thirst" component and associated system. This is NOT
 // THE AI. It's a plain old system that just makes an entity "thirstier" over
@@ -128,20 +128,22 @@ pub fn thirsty_scorer_system(
 // Now that we have all that defined, it's time to add a Thinker to an entity!
 // The Thinker is the actual "brain" behind all the AI. Every entity you want
 // to have AI behavior should have one *or more* Thinkers attached to it.
-pub fn init_entities(mut cmd: Commands) {
+pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
     // Create the entity and throw the Thirst component in there. Nothing special here.
     cmd.spawn((
         Thirst::new(75.0, 2.0),
-        Thinker::build(FirstToScore { threshold: 0.8 })
-            // Technically these are supposed to be ActionBuilders and
-            // ScorerBuilders, but our Clone impls simplify our code here.
-            .when(
-                Thirsty,
-                Drink {
-                    until: 70.0,
-                    per_second: 5.0,
-                },
-            ),
+        thinkers.add(
+            ThinkerSpawner::first_to_score(0.8)
+                // Technically these are supposed to be ActionBuilders and
+                // ScorerBuilders, but our Clone impls simplify our code here.
+                .when(
+                    Thirsty,
+                    Drink {
+                        until: 70.0,
+                        per_second: 5.0,
+                    },
+                ),
+        ),
     ));
 }
 
@@ -154,7 +156,7 @@ fn main() {
             filter: "big_brain=debug,thirst=debug".to_string(),
             ..default()
         }))
-        .add_plugins(BigBrainPlugin::new(PreUpdate))
+        .add_plugins(BigBrainPlugin::new(Update, Update, PostUpdate, Last))
         .add_systems(Startup, init_entities)
         .add_systems(Update, thirst_system)
         // Big Brain has specific sets for Scorers and Actions. If

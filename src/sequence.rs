@@ -1,29 +1,38 @@
-use crate::action::{Action, ActionCommands, ActionSpawn, ActionState, ActionsList};
-use crate::thinker::Actor;
-use bevy::prelude::*;
+use crate::{
+    action::{Action, ActionCommands, ActionSpawn, ActionState, ActionsList},
+    thinker::Actor,
+};
+use bevy_ecs::{
+    component::Component,
+    entity::Entity,
+    query::Without,
+    system::{Commands, Query},
+    world::Mut,
+};
+use bevy_hierarchy::{AddChild, Children};
+use bevy_log as log;
+use bevy_reflect::Reflect;
 use std::sync::Arc;
 
-/// Configures what mode the [`Concurrently`] action will run in.
+/// Configures what mode the [`Sequence`] action will run in.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Reflect)]
 pub enum SequenceMode {
     /// Reaches success when any of the concurrent actions reaches [`ActionState::Success`].
     Race,
     /// Reaches success when all of the concurrent actions reach [`ActionState::Success`].
     Join,
-
     /// Composite Action that executes a series of steps in sequential order, as
     /// long as each step results in a `Success`ful [`ActionState`].
     Step,
 }
 
-/// [`ActionBuilder`] for the [`Concurrently`] component.
-/// Constructed through `Concurrently::build()`.
-pub struct SequenceBuilder {
+/// [`ActionSpawn`] for the [`Sequence`] component.
+pub struct SequenceSpawner {
     mode: SequenceMode,
     actions: Vec<Arc<dyn ActionSpawn>>,
 }
 
-impl ActionSpawn for SequenceBuilder {
+impl ActionSpawn for SequenceSpawner {
     fn spawn(&self, mut cmd: ActionCommands) -> Action {
         let action = cmd.spawn(Sequence {
             mode: self.mode,
@@ -49,7 +58,7 @@ impl ActionSpawn for SequenceBuilder {
 }
 
 /// Composite Action that executes a number of Actions concurrently. Whether
-/// this action succeeds depends on its [`ConcurrentMode`]:
+/// this action succeeds depends on its [`SequenceMode`]:
 ///
 /// * [`SequenceMode::Join`] succeeds when **all** of the actions
 ///   succeed.
@@ -59,7 +68,7 @@ impl ActionSpawn for SequenceBuilder {
 ///
 /// ```
 /// # use bevy::prelude::*;
-/// # use big_brain::prelude::*;
+/// # use big_brain::*;
 /// # #[derive(Debug, Clone, Component, ScorerSpawn)]
 /// # struct MyScorer;
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
@@ -67,7 +76,7 @@ impl ActionSpawn for SequenceBuilder {
 /// # #[derive(Debug, Clone, Component, ActionSpawn)]
 /// # struct MyOtherAction;
 /// # fn main() {
-/// Thinker::build(Highest)
+/// ThinkerSpawner::highest(0.0)
 ///     .when(MyScorer, Sequence::join((MyAction, MyOtherAction)))
 /// # ;
 /// # }
@@ -81,25 +90,25 @@ pub struct Sequence {
 }
 
 impl Sequence {
-    /// Construct a new [`ConcurrentlyBuilder`] to define the actions to take.
-    pub fn join<B: ActionsList>(actions: B) -> SequenceBuilder {
-        SequenceBuilder {
+    /// Construct a new [`SequenceSpawner`] to define the actions to take.
+    pub fn join<B: ActionsList>(actions: B) -> SequenceSpawner {
+        SequenceSpawner {
             mode: SequenceMode::Join,
             actions: ActionsList::build(actions),
         }
     }
 
-    /// Construct a new [`ConcurrentlyBuilder`] to define the actions to take.
-    pub fn race<B: ActionsList>(actions: B) -> SequenceBuilder {
-        SequenceBuilder {
+    /// Construct a new [`SequenceSpawner`] to define the actions to take.
+    pub fn race<B: ActionsList>(actions: B) -> SequenceSpawner {
+        SequenceSpawner {
             mode: SequenceMode::Race,
             actions: ActionsList::build(actions),
         }
     }
 
-    /// Construct a new [`ConcurrentlyBuilder`] to define the actions to take.
-    pub fn step<B: ActionsList>(actions: B) -> SequenceBuilder {
-        SequenceBuilder {
+    /// Construct a new [`SequenceSpawner`] to define the actions to take.
+    pub fn step<B: ActionsList>(actions: B) -> SequenceSpawner {
+        SequenceSpawner {
             mode: SequenceMode::Step,
             actions: ActionsList::build(actions),
         }
@@ -113,7 +122,9 @@ pub fn sequence_system(
     mut states: Query<&mut ActionState, Without<Sequence>>,
 ) {
     for (parent, this_state, sequence, actions, &actor) in query.iter_mut() {
-        match sequence.mode {
+        let mode = sequence.mode;
+        log::trace!("start {:?} {:?}", mode, parent);
+        match mode {
             SequenceMode::Join => exec_join(this_state, actions, &mut states),
             SequenceMode::Race => exec_race(this_state, actions, &mut states),
             SequenceMode::Step => exec_step(
@@ -126,6 +137,7 @@ pub fn sequence_system(
                 actor,
             ),
         }
+        log::trace!("end {:?} {:?}", mode, parent);
     }
 }
 
@@ -134,10 +146,8 @@ fn exec_join(
     actions: &Children,
     states: &mut Query<&mut ActionState, Without<Sequence>>,
 ) {
-    use ActionState::*;
-
     match this_state.clone() {
-        Executing => {
+        ActionState::Executing => {
             let mut all_success = true;
             let mut failed_index = None;
 
@@ -145,9 +155,9 @@ fn exec_join(
                 let mut child = states.get_mut(child_entity).unwrap();
                 all_success &= child.is_success();
                 match *child {
-                    Failure => failed_index = Some(index),
-                    Executing if failed_index.is_some() => child.cancel(),
-                    Executing | Cancelled | Success => (),
+                    ActionState::Failure => failed_index = Some(index),
+                    ActionState::Executing if failed_index.is_some() => child.cancel(),
+                    ActionState::Executing | ActionState::Cancelled | ActionState::Success => (),
                 }
             }
 
@@ -160,7 +170,7 @@ fn exec_join(
                 this_state.failure();
             }
         }
-        Cancelled => {
+        ActionState::Cancelled => {
             let mut any_err = false;
             let mut all_done = true;
 
@@ -168,9 +178,9 @@ fn exec_join(
                 let mut child = states.get_mut(child_entity).unwrap();
                 all_done &= child.is_done();
                 match *child {
-                    Failure => any_err = true,
-                    Executing => child.cancel(),
-                    Success | Cancelled => (),
+                    ActionState::Failure => any_err = true,
+                    ActionState::Executing => child.cancel(),
+                    ActionState::Success | ActionState::Cancelled => (),
                 }
             }
 
@@ -181,7 +191,7 @@ fn exec_join(
                 this_state.success()
             }
         }
-        Success | Failure => {}
+        ActionState::Success | ActionState::Failure => {}
     }
 }
 
@@ -190,10 +200,8 @@ fn exec_race(
     actions: &Children,
     states: &mut Query<&mut ActionState, Without<Sequence>>,
 ) {
-    use ActionState::*;
-
     match this_state.clone() {
-        Executing => {
+        ActionState::Executing => {
             let mut all_failure = true;
             let mut succeed_index = None;
 
@@ -201,9 +209,9 @@ fn exec_race(
                 let mut child = states.get_mut(child_entity).unwrap();
                 all_failure &= child.is_failure();
                 match *child {
-                    Success => succeed_index = Some(index),
-                    Executing if succeed_index.is_some() => child.cancel(),
-                    Executing | Cancelled | Failure => (),
+                    ActionState::Success => succeed_index = Some(index),
+                    ActionState::Executing if succeed_index.is_some() => child.cancel(),
+                    ActionState::Executing | ActionState::Cancelled | ActionState::Failure => (),
                 }
             }
 
@@ -216,7 +224,7 @@ fn exec_race(
                 this_state.success();
             }
         }
-        Cancelled => {
+        ActionState::Cancelled => {
             let mut any_ok = false;
             let mut all_done = true;
 
@@ -224,9 +232,9 @@ fn exec_race(
                 let mut child = states.get_mut(child_entity).unwrap();
                 all_done &= child.is_done();
                 match *child {
-                    Success => any_ok = true,
-                    Executing => child.cancel(),
-                    Failure | Cancelled => (),
+                    ActionState::Success => any_ok = true,
+                    ActionState::Executing => child.cancel(),
+                    ActionState::Failure | ActionState::Cancelled => (),
                 }
             }
 
@@ -237,7 +245,7 @@ fn exec_race(
                 this_state.failure()
             }
         }
-        Success | Failure => {}
+        ActionState::Success | ActionState::Failure => {}
     }
 }
 
@@ -251,43 +259,37 @@ fn exec_step(
     mut sequence: Mut<Sequence>,
     actor: Actor,
 ) {
-    use ActionState::*;
-
     let Some(active) = actions.first().copied().map(Action) else {
         return;
     };
 
     let mut active_state = states.get_mut(active.entity()).unwrap();
 
-    match this_state.clone() {
-        Executing => match *active_state {
-            // do nothing. Everything's running as it should.
-            Executing | Cancelled => {}
-            Success => {
-                cmd.add(active.despawn_recursive());
+    match (this_state.clone(), active_state.clone()) {
+        (ActionState::Executing, ActionState::Executing | ActionState::Cancelled) => (),
+        (ActionState::Executing, ActionState::Success) => {
+            cmd.add(active.despawn_recursive());
 
-                if sequence.active_step == sequence.steps.len() - 1 {
-                    // We're done! Let's just be successful
-                    this_state.success();
-                } else {
-                    sequence.active_step += 1;
-                    let child =
-                        sequence.steps[sequence.active_step].spawn(ActionCommands::new(cmd, actor));
-                    let child = child.entity();
-                    cmd.add(AddChild { parent, child });
-                }
+            if sequence.active_step == sequence.steps.len() - 1 {
+                // We're done! Let's just be successful
+                this_state.success();
+            } else {
+                sequence.active_step += 1;
+                let child =
+                    sequence.steps[sequence.active_step].spawn(ActionCommands::new(cmd, actor));
+                let child = child.entity();
+                cmd.add(AddChild { parent, child });
             }
-            Failure => {
-                cmd.add(active.despawn_recursive());
-                this_state.failure();
-            }
-        },
-        Cancelled => match *active_state {
-            Executing => active_state.cancel(),
-            Success => this_state.success(),
-            Failure => this_state.failure(),
-            Cancelled => (),
-        },
-        Success | Failure => (),
+        }
+        (ActionState::Executing, ActionState::Failure) => {
+            cmd.add(active.despawn_recursive());
+            this_state.failure();
+        }
+
+        (ActionState::Cancelled, ActionState::Executing) => active_state.cancel(),
+        (ActionState::Cancelled, ActionState::Success) => this_state.success(),
+        (ActionState::Cancelled, ActionState::Failure) => this_state.failure(),
+
+        (_, _) => (),
     }
 }
