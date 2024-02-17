@@ -107,7 +107,9 @@ fn exit_action(
     for (_actor, mut state) in query.iter_mut() {
         info!("exit_action {state:?}");
         match *state {
-            ActionState::Executing => app_exit_events.send(AppExit),
+            ActionState::Executing => {
+                app_exit_events.send(AppExit);
+            }
             ActionState::Cancelled => state.failure(),
             ActionState::Success | ActionState::Failure => (),
         }
