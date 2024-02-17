@@ -177,14 +177,11 @@ mod scorer;
 mod sequence;
 mod thinker;
 
-// //! Convenience module with the core types you're most likely to use when working with Big Brain.
-// //! Mean to be used like `use big_brain::*;`
-
 pub use big_brain_derive::{ActionSpawn, ScorerSpawn};
 
 pub use crate::{
     action::{Action, ActionCommands, ActionQuery, ActionSpawn, ActionState},
-    evaluator::{EvaluatingScorer, Evaluator, LinearEvaluator, PowerEvaluator, SigmoidEvaluator},
+    evaluator::{EvaluatingScorer, Evaluator, FnEvaluator, Linear, Power, Sigmoid},
     measures::{Measure, MeasuredScorer, WeightedScore},
     pickers::{FirstToScore, Highest, Picker},
     scorer::{

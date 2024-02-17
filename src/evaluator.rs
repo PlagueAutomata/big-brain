@@ -40,9 +40,7 @@ pub trait Evaluator: Sync + Send {
 /// # }
 /// ```
 #[derive(Component, Clone)]
-pub struct EvaluatingScorer {
-    evaluator: Arc<dyn Evaluator>,
-}
+pub struct EvaluatingScorer(Arc<dyn Evaluator>);
 
 impl EvaluatingScorer {
     pub fn build(
@@ -50,7 +48,7 @@ impl EvaluatingScorer {
         evaluator: impl Evaluator + 'static,
     ) -> impl ScorerSpawn {
         let evaluator = Arc::new(evaluator);
-        ScorerSpawner::new(Self { evaluator }, scorer)
+        ScorerSpawner::new(Self(evaluator), scorer)
     }
 }
 
@@ -61,178 +59,187 @@ pub fn evaluating_scorer_system(
     for (this_entity, this, children) in query.iter() {
         let &inner = children.first().unwrap();
         let &Score(inner) = scores.get(inner).unwrap();
-        let value = this.evaluator.evaluate(inner).clamp(0.0, 1.0);
+        let value = this.0.evaluate(inner).clamp(0.0, 1.0);
         scores.get_mut(this_entity).unwrap().set(value);
     }
 }
 
-/// [`Evaluator`] for linear values.
-/// That is, there's no curve to the value mapping.
-#[derive(Debug, Clone, Reflect)]
-pub struct LinearEvaluator {
-    xa: f32,
-    ya: f32,
-    xb: f32,
-    yb: f32,
-}
+/// [`Evaluator`] based on function.
+pub struct FnEvaluator(Arc<dyn (Fn(f32) -> f32) + Sync + Send>);
 
-impl LinearEvaluator {
-    pub fn new((xa, ya): (f32, f32), (xb, yb): (f32, f32)) -> Self {
-        Self { xa, ya, xb, yb }
+impl FnEvaluator {
+    pub fn new(f: impl (Fn(f32) -> f32) + Sync + Send + 'static) -> Self {
+        Self(Arc::new(f))
+    }
+
+    pub fn linear(a: (f32, f32), b: (f32, f32)) -> Self {
+        let e = Linear::new(a, b);
+        Self::new(move |t| e.eval(t))
+    }
+
+    pub fn power(power: f32, a: (f32, f32), b: (f32, f32)) -> Self {
+        let e = Power::new(power, a, b);
+        Self::new(move |t| e.eval(t))
+    }
+
+    pub fn sigmoid(k: f32, a: (f32, f32), b: (f32, f32)) -> Self {
+        let e = Sigmoid::new(k, a, b);
+        Self::new(move |t| e.eval(t))
     }
 }
 
-impl Default for LinearEvaluator {
-    fn default() -> Self {
-        Self::new((0.0, 0.0), (1.0, 1.0))
-    }
-}
-
-impl Evaluator for LinearEvaluator {
+impl Evaluator for FnEvaluator {
     fn evaluate(&self, value: f32) -> f32 {
-        let dy_over_dx = (self.yb - self.ya) / (self.xb - self.xa);
-        (self.ya + dy_over_dx * (value - self.xa)).clamp(self.ya, self.yb)
+        (self.0)(value)
+    }
+}
+
+/// [`Evaluator`] with a "Sigmoid", or "S-like" curve.
+#[derive(Debug, Clone, Copy, Reflect)]
+pub struct Sigmoid {
+    k: f32,
+    min: f32,
+    max: f32,
+    x_mean: f32,
+    y_mean: f32,
+    half_dy: f32,
+    two_over_dx: f32,
+}
+
+impl Evaluator for Sigmoid {
+    fn evaluate(&self, value: f32) -> f32 {
+        self.eval(value)
+    }
+}
+
+impl Default for Sigmoid {
+    fn default() -> Self {
+        Self::new(-0.5, (0.0, 0.0), (1.0, 1.0))
+    }
+}
+
+impl Sigmoid {
+    #[inline]
+    pub fn new(k: f32, (ax, ay): (f32, f32), (bx, by): (f32, f32)) -> Self {
+        Self {
+            k: k.clamp(-0.99999, 0.99999),
+            min: ax.min(bx),
+            max: ax.max(bx),
+            x_mean: (ax + bx) / 2.0,
+            y_mean: (ay + by) / 2.0,
+            half_dy: (by - ay) / 2.0,
+            two_over_dx: 2.0 / (bx - ax),
+        }
+    }
+
+    #[inline]
+    pub fn eval(self, t: f32) -> f32 {
+        let t = t.clamp(self.min, self.max);
+        let value = self.two_over_dx * (t - self.x_mean);
+        let num = value * (1.0 - self.k);
+        let den = self.k * (1.0 - 2.0 * value.abs()) + 1.0;
+        self.half_dy * (num / den) + self.y_mean
     }
 }
 
 /// [`Evaluator`] with an exponent curve.
 /// The value will grow according to its `power` parameter.
-#[derive(Debug, Clone, Reflect)]
-pub struct PowerEvaluator {
+#[derive(Debug, Clone, Copy, Reflect)]
+pub struct Power {
     power: f32,
-    a: (f32, f32),
-    b: (f32, f32),
+    ax: f32,
+    ay: f32,
+    dx: f32,
+    dy: f32,
+    min: f32,
+    max: f32,
 }
 
-impl PowerEvaluator {
-    pub fn new(power: f32, (xa, ya): (f32, f32), (xb, yb): (f32, f32)) -> Self {
-        Self {
-            power: power.clamp(0.0, 10000.0),
-            a: (xa, ya),
-            b: (xb, yb),
-        }
-    }
-}
-
-impl Default for PowerEvaluator {
+impl Default for Power {
     fn default() -> Self {
         Self::new(2.0, (0.0, 0.0), (1.0, 1.0))
     }
 }
 
-impl Evaluator for PowerEvaluator {
+impl Evaluator for Power {
     fn evaluate(&self, value: f32) -> f32 {
-        let cx = value.clamp(self.a.0, self.b.0);
-        let dx = self.b.0 - self.a.0;
-        let dy = self.b.1 - self.a.1;
-        dy * ((cx - self.a.0) / dx).powf(self.power) + self.a.1
+        self.eval(value)
     }
 }
 
-/// [`Evaluator`] with a "Sigmoid", or "S-like" curve.
-#[derive(Debug, Clone, Reflect)]
-pub struct SigmoidEvaluator {
-    xa: f32,
-    xb: f32,
-
-    ya: f32,
-    yb: f32,
-
-    k: f32,
-
-    x_mean: f32,
-    y_mean: f32,
-    dy_over_two: f32,
-    two_over_dx: f32,
-}
-
-impl SigmoidEvaluator {
-    pub fn new_simple(k: f32) -> Self {
-        Self::new(k, (0.0, 0.0), (1.0, 1.0))
-    }
-
-    pub fn new_ranged(k: f32, min: f32, max: f32) -> Self {
-        Self::new(k, (min, 0.0), (max, 1.0))
-    }
-
-    pub fn new(k: f32, (xa, ya): (f32, f32), (xb, yb): (f32, f32)) -> Self {
+impl Power {
+    #[inline]
+    pub fn new(power: f32, (ax, ay): (f32, f32), (bx, by): (f32, f32)) -> Self {
         Self {
-            xa,
-            xb,
-            ya,
-            yb,
-
-            k: k.clamp(-0.99999, 0.99999),
-
-            x_mean: (xa + xb) / 2.0,
-            y_mean: (ya + yb) / 2.0,
-
-            dy_over_two: (yb - ya) / 2.0,
-            two_over_dx: (2.0 / (xb - ya)).abs(),
+            power,
+            ax,
+            ay,
+            dx: (bx - ax),
+            dy: (by - ay),
+            min: ax.min(bx),
+            max: ax.max(bx),
         }
     }
-}
 
-impl Evaluator for SigmoidEvaluator {
-    fn evaluate(&self, value: f32) -> f32 {
-        let cx_minus_x_mean = value.clamp(self.xa, self.xb) - self.x_mean;
-        let numerator = self.two_over_dx * cx_minus_x_mean * (1.0 - self.k);
-        let denominator = self.k * (1.0 - 2.0 * (self.two_over_dx * cx_minus_x_mean)).abs() + 1.0;
-        (self.dy_over_two * (numerator / denominator) + self.y_mean).clamp(self.ya, self.yb)
+    #[inline]
+    pub fn eval(self, t: f32) -> f32 {
+        let t = t.clamp(self.min, self.max);
+        self.dy * ((t - self.ax) / self.dx).powf(self.power) + self.ay
     }
 }
 
-impl Default for SigmoidEvaluator {
+/// [`Evaluator`] for linear values.
+/// That is, there's no curve to the value mapping.
+#[derive(Debug, Clone, Copy, Reflect)]
+pub struct Linear {
+    ax: f32,
+    ay: f32,
+    min: f32,
+    max: f32,
+    dy_over_dx: f32,
+}
+
+impl Default for Linear {
     fn default() -> Self {
-        Self::new_simple(-0.5)
+        Self::new((0.0, 0.0), (1.0, 1.0))
     }
 }
 
-pub fn linear_evaluator(
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
-) -> impl Fn(f32) -> f32 + Copy {
-    let dx = max_x - min_x;
-    let dy = max_y - min_y;
-    move |v| (min_y + (dy / dx) * (v - min_x))
+impl Evaluator for Linear {
+    fn evaluate(&self, value: f32) -> f32 {
+        self.eval(value)
+    }
 }
 
-pub fn power_evaluator(
-    power: f32,
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
-) -> impl Fn(f32) -> f32 + Copy {
-    let dx = max_x - min_x;
-    let dy = max_y - min_y;
-    move |v| dy * (v - min_x / dx).powf(power) + min_y
+impl Linear {
+    #[inline]
+    pub fn new((ax, ay): (f32, f32), (bx, by): (f32, f32)) -> Self {
+        Self {
+            ax,
+            ay,
+            min: ax.min(bx),
+            max: ax.max(bx),
+            dy_over_dx: (by - ay) / (bx - ax),
+        }
+    }
+
+    #[inline]
+    pub fn eval(self, t: f32) -> f32 {
+        let t = t.clamp(self.min, self.max);
+        self.ay + self.dy_over_dx * (t - self.ax)
+    }
 }
 
-pub fn sigmoid_evaluator(
-    k: f32,
-    min_x: f32,
-    max_x: f32,
-    min_y: f32,
-    max_y: f32,
-) -> impl Fn(f32) -> f32 + Copy {
-    let dx = max_x - min_x;
-    let dy = max_y - min_y;
+fn linear_simple(t: f32) -> f32 {
+    t.clamp(0.0, 1.0)
+}
 
+pub fn power_simple(t: f32, power: f32) -> f32 {
+    t.clamp(0.0, 1.0).powf(power)
+}
+
+fn sigmoid_simple(t: f32, k: f32) -> f32 {
     let k = k.clamp(-0.99999, 0.99999);
-
-    let x_mean = (min_x + max_x) / 2.0;
-    let y_mean = (min_y + max_y) / 2.0;
-
-    let dy_over_two = dy / 2.0;
-    let two_over_dx = (2.0 / dx).abs();
-
-    move |v| {
-        let cx_minus_x_mean = v.clamp(min_x, max_x) - x_mean;
-        let numerator = two_over_dx * cx_minus_x_mean * (1.0 - k);
-        let denominator = k * (1.0 - 2.0 * (two_over_dx * cx_minus_x_mean)).abs() + 1.0;
-        (dy_over_two * (numerator / denominator) + y_mean).clamp(min_y, max_y)
-    }
+    let t = 2.0 * t.clamp(0.0, 1.0) - 1.0;
+    (t - t * k) / (4.0 * k * (0.5 - t.abs()) + 2.0) + 0.5
 }

@@ -7,10 +7,10 @@ use bevy_ecs::{
     bundle::Bundle,
     component::Component,
     entity::Entity,
-    query::{With, WorldQuery},
+    query::{QueryData, With},
     system::{Commands, Query},
 };
-use bevy_hierarchy::{AddChild, Children};
+use bevy_hierarchy::{Children, PushChild};
 use bevy_reflect::Reflect;
 use bevy_utils::all_tuples;
 use std::sync::Arc;
@@ -33,9 +33,9 @@ impl<'w, 's, 'a> ScorerCommands<'w, 's, 'a> {
     }
 
     #[inline]
-    pub fn add_child(&mut self, Scorer(parent): Scorer, builder: &dyn ScorerSpawn) {
+    pub fn push_child(&mut self, Scorer(parent): Scorer, builder: &dyn ScorerSpawn) {
         let Scorer(child) = builder.spawn(ScorerCommands::new(self.cmd, self.actor));
-        self.cmd.add(AddChild { parent, child })
+        self.cmd.add(PushChild { parent, child })
     }
 }
 
@@ -77,7 +77,7 @@ impl<Bundle: Component + Clone> ScorerSpawn for ScorerSpawner<Bundle> {
     fn spawn(&self, mut cmd: ScorerCommands) -> Scorer {
         let scorer = cmd.spawn(self.bundle.clone());
         for child in &self.scorers {
-            cmd.add_child(scorer, child.as_ref());
+            cmd.push_child(scorer, child.as_ref());
         }
         scorer
     }
@@ -128,8 +128,8 @@ pub trait ScorerSpawn: Sync + Send {
     fn spawn(&self, cmd: ScorerCommands) -> Scorer;
 }
 
-#[derive(WorldQuery)]
-#[world_query(mutable)]
+#[derive(QueryData)]
+#[query_data(mutable)]
 pub struct ScorerQuery {
     score: &'static mut Score,
     actor: &'static Actor,

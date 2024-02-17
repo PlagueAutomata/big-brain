@@ -9,7 +9,7 @@ use bevy_ecs::{
     system::{Commands, Query},
     world::Mut,
 };
-use bevy_hierarchy::{AddChild, Children};
+use bevy_hierarchy::{Children, PushChild};
 use bevy_log as log;
 use bevy_reflect::Reflect;
 use std::sync::Arc;
@@ -43,12 +43,12 @@ impl ActionSpawn for SequenceSpawner {
         match self.mode {
             SequenceMode::Join | SequenceMode::Race => {
                 for child in &self.actions {
-                    cmd.add_child(action, child.as_ref());
+                    cmd.push_child(action, child.as_ref());
                 }
             }
             SequenceMode::Step => {
                 if let Some(child) = self.actions.first() {
-                    cmd.add_child(action, child.as_ref());
+                    cmd.push_child(action, child.as_ref());
                 }
             }
         }
@@ -278,7 +278,7 @@ fn exec_step(
                 let child =
                     sequence.steps[sequence.active_step].spawn(ActionCommands::new(cmd, actor));
                 let child = child.entity();
-                cmd.add(AddChild { parent, child });
+                cmd.add(PushChild { parent, child });
             }
         }
         (ActionState::Executing, ActionState::Failure) => {

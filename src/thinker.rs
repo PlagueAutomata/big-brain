@@ -13,7 +13,7 @@ use bevy_ecs::{
     query::Without,
     system::{Commands, Query, Res},
 };
-use bevy_hierarchy::{AddChild, DespawnRecursiveExt};
+use bevy_hierarchy::{DespawnRecursiveExt, PushChild};
 use bevy_log as log;
 use bevy_reflect::{Reflect, TypePath};
 use std::{collections::VecDeque, sync::Arc};
@@ -202,7 +202,7 @@ pub fn thinker_maintain_system(
         let choices = choices.map(|ChoiceBuilder { when, then }| {
             let scorer = when.spawn(ScorerCommands::new(&mut cmd, Actor(actor)));
             let action = then.clone();
-            cmd.add(AddChild {
+            cmd.add(PushChild {
                 parent,
                 child: scorer.0,
             });

@@ -154,7 +154,7 @@ impl ScorerSpawn for MeasuredScorerSpawner {
         });
 
         for (child, _weight) in &self.scorers {
-            cmd.add_child(scorer, child.as_ref());
+            cmd.push_child(scorer, child.as_ref());
         }
 
         scorer

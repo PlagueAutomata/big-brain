@@ -6,10 +6,10 @@ use bevy_ecs::{
     bundle::Bundle,
     component::Component,
     entity::{Entity, EntityMapper, MapEntities},
-    query::WorldQuery,
+    query::QueryData,
     system::Commands,
 };
-use bevy_hierarchy::{AddChild, DespawnRecursive};
+use bevy_hierarchy::{DespawnRecursive, PushChild};
 use bevy_reflect::Reflect;
 use bevy_utils::all_tuples;
 use std::sync::Arc;
@@ -18,8 +18,8 @@ use std::sync::Arc;
 pub struct Action(pub(crate) Entity);
 
 impl MapEntities for Action {
-    fn map_entities(&mut self, entity_mapper: &mut EntityMapper) {
-        self.0 = entity_mapper.get_or_reserve(self.0);
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.0 = entity_mapper.map_entity(self.0);
     }
 }
 
@@ -52,9 +52,9 @@ impl<'w, 's, 'a> ActionCommands<'w, 's, 'a> {
     }
 
     #[inline]
-    pub fn add_child(&mut self, Action(parent): Action, builder: &dyn ActionSpawn) {
+    pub fn push_child(&mut self, Action(parent): Action, builder: &dyn ActionSpawn) {
         let Action(child) = builder.spawn(ActionCommands::new(self.cmd, self.actor));
-        self.cmd.add(AddChild { parent, child })
+        self.cmd.add(PushChild { parent, child })
     }
 }
 
@@ -222,8 +222,8 @@ macro_rules! impl_actions_list {
 
 all_tuples!(impl_actions_list, 1, 15, Type, index);
 
-#[derive(WorldQuery)]
-#[world_query(mutable)]
+#[derive(QueryData)]
+#[query_data(mutable)]
 pub struct ActionQuery {
     state: &'static mut ActionState,
     actor: &'static Actor,
