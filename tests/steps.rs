@@ -108,7 +108,7 @@ fn exit_action(
         info!("exit_action {state:?}");
         match *state {
             ActionState::Executing => {
-                app_exit_events.send(AppExit);
+                app_exit_events.send(AppExit::Success);
             }
             ActionState::Cancelled => state.failure(),
             ActionState::Success | ActionState::Failure => (),

@@ -194,8 +194,8 @@ pub use crate::{
 
 use bevy_app::{App, Plugin};
 use bevy_asset::AssetApp;
+use bevy_ecs::intern::Interned;
 use bevy_ecs::schedule::{IntoSystemConfigs, ScheduleLabel, SystemSet};
-use bevy_utils::intern::Interned;
 
 /// Core [`Plugin`] for Big Brain behavior. Required for any of the
 /// [`Thinker`]-related magic to work.
