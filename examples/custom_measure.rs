@@ -28,7 +28,7 @@ pub struct Pancakes(pub f32);
 pub struct Waffles(pub f32);
 
 pub fn eat_dessert(time: Res<Time>, mut pancakes: Query<(&mut Pancakes, &mut Waffles)>) {
-    let delta_t = time.delta_seconds();
+    let delta_t = time.delta_secs();
 
     for (mut pancake, mut waffle) in pancakes.iter_mut() {
         pancake.0 = (pancake.0 - delta_t).max(0.0);
@@ -91,7 +91,7 @@ fn eat_thing_action<
 
                     debug!("You should {:?}", action_marker);
 
-                    item.eat(time.delta_seconds() * 5.0);
+                    item.eat(time.delta_secs() * 5.0);
 
                     // we should stop at some eating pancakes at some point, unfortunately
                     if item.get() > 80.0 {
@@ -169,7 +169,7 @@ pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawn
             ),
     );
 
-    cmd.spawn((Pancakes(50.0), Waffles(50.0), thinker));
+    cmd.spawn((Pancakes(50.0), Waffles(50.0), HandleThinkerSpawner(thinker)));
 }
 
 fn main() {

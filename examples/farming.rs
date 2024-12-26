@@ -4,9 +4,9 @@ use bevy::{log::LogPlugin, prelude::*};
 use bevy_scene_hook::{HookPlugin, HookedSceneBundle, SceneHook};
 use big_brain::*;
 
-const DEFAULT_COLOR: Color = Color::BLACK;
-const SLEEP_COLOR: Color = Color::RED;
-const FARM_COLOR: Color = Color::BLUE;
+const DEFAULT_COLOR: Color = Color::Srgba(bevy::color::palettes::basic::BLACK);
+const SLEEP_COLOR: Color = Color::Srgba(bevy::color::palettes::basic::RED);
+const FARM_COLOR: Color = Color::Srgba(bevy::color::palettes::basic::BLUE);
 const MAX_DISTANCE: f32 = 0.1;
 const MAX_INVENTORY_ITEMS: f32 = 20.0;
 
@@ -46,7 +46,7 @@ pub struct Fatigue {
 
 pub fn fatigue_system(time: Res<Time>, mut fatigues: Query<&mut Fatigue>) {
     for mut fatigue in &mut fatigues {
-        fatigue.level += fatigue.per_second * time.delta_seconds();
+        fatigue.level += fatigue.per_second * time.delta_secs();
         if fatigue.level >= 100.0 {
             fatigue.level = 100.0;
         }
@@ -62,7 +62,7 @@ pub struct Sleep {
 
 fn sleep_action_system(
     time: Res<Time>,
-    mut actors: Query<(&mut Fatigue, &Handle<StandardMaterial>)>,
+    mut actors: Query<(&mut Fatigue, &MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut query: Query<(ActionQuery, &Sleep)>,
 ) {
@@ -83,7 +83,7 @@ fn sleep_action_system(
 
             trace!("Sleeping...");
 
-            fatigue.level -= sleep.per_second * time.delta_seconds();
+            fatigue.level -= sleep.per_second * time.delta_secs();
             material.base_color = SLEEP_COLOR;
 
             if fatigue.level <= sleep.until {
@@ -140,7 +140,7 @@ pub struct Farm {
 
 fn farm_action_system(
     time: Res<Time>,
-    mut actors: Query<(&mut Inventory, &Handle<StandardMaterial>)>,
+    mut actors: Query<(&mut Inventory, &MeshMaterial3d<StandardMaterial>)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut query: Query<(ActionQuery, &Farm)>,
 ) {
@@ -157,7 +157,7 @@ fn farm_action_system(
             //debug!("Time to farm!");
 
             trace!("Farming...");
-            inventory.items += farm.per_second * time.delta_seconds();
+            inventory.items += farm.per_second * time.delta_secs();
             material.base_color = FARM_COLOR;
 
             if inventory.items >= MAX_INVENTORY_ITEMS {
@@ -184,7 +184,7 @@ pub fn work_need_scorer_system(
 ) {
     for mut score in &mut query {
         let inventory = actors.get(score.actor());
-        let need_more = inventory.map_or(false, |inv| inv.items < MAX_INVENTORY_ITEMS);
+        let need_more = inventory.is_ok_and(|inv| inv.items < MAX_INVENTORY_ITEMS);
         score.set(if need_more { 0.6 } else { 0.0 });
     }
 }
@@ -234,7 +234,7 @@ pub fn sell_need_scorer_system(
 ) {
     for mut score in &mut query {
         let inventory = actors.get(score.actor());
-        let has_enough = inventory.map_or(false, |inv| inv.items >= MAX_INVENTORY_ITEMS);
+        let has_enough = inventory.is_ok_and(|inv| inv.items >= MAX_INVENTORY_ITEMS);
         score.set(if has_enough { 0.6 } else { 0.0 });
     }
 }
@@ -299,7 +299,7 @@ impl<T: Component + Clone> MoveToNearest<T> {
             if distance > MAX_DISTANCE {
                 trace!("Stepping closer.");
 
-                let step = move_to.speed * time.delta_seconds();
+                let step = move_to.speed * time.delta_secs();
                 let step = delta.normalize() * step.min(distance);
 
                 actor_transform.translation.x += step.x;
@@ -317,7 +317,7 @@ impl<T: Component + Clone> MoveToNearest<T> {
 // ================================================================================
 
 type TextQuery<'a> = (
-    &'a mut Text,
+    &'a mut TextSpan,
     Has<MoneyText>,
     Has<FatigueText>,
     Has<InventoryText>,
@@ -326,7 +326,7 @@ type TextQuery<'a> = (
 fn update_ui(actor_query: Query<(&Inventory, &Fatigue)>, mut text_query: Query<TextQuery>) {
     for (inventory, fatigue) in &mut actor_query.iter() {
         for (mut text, has_money, has_fatigue, has_inventory) in &mut text_query {
-            text.sections[0].value = match () {
+            text.0 = match () {
                 _ if has_money => format!("Money: {}", inventory.money),
                 _ if has_fatigue => format!("Fatigue: {}", fatigue.level as u32),
                 _ if has_inventory => format!("Inventory: {}", inventory.items as u32),
@@ -343,11 +343,10 @@ fn init_entities(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.spawn((Camera3dBundle {
-        transform: Transform::from_xyz(6.0, 6.0, 4.0)
-            .looking_at(Vec3::new(0.0, -1.0, 0.0), Vec3::Y),
-        ..default()
-    },));
+    commands.spawn((
+        Transform::from_xyz(6.0, 6.0, 4.0).looking_at(Vec3::new(0.0, -1.0, 0.0), Vec3::Y),
+        Camera3d::default(),
+    ));
 
     commands.insert_resource(AmbientLight {
         color: Color::WHITE,
@@ -356,14 +355,11 @@ fn init_entities(
 
     commands.spawn((
         Name::new("Light"),
-        SpotLightBundle {
-            spot_light: SpotLight {
-                shadows_enabled: true,
-                intensity: 5_000.0,
-                range: 100.0,
-                ..default()
-            },
-            transform: Transform::from_xyz(2.0, 10.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(2.0, 10.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        SpotLight {
+            shadows_enabled: true,
+            intensity: 5_000.0,
+            range: 100.0,
             ..default()
         },
     ));
@@ -371,10 +367,7 @@ fn init_entities(
     commands.spawn((
         Name::new("Town"),
         HookedSceneBundle {
-            scene: SceneBundle {
-                scene: asset_server.load("town.glb#Scene0"),
-                ..default()
-            },
+            scene: SceneRoot(asset_server.load("town.glb#Scene0")),
             hook: SceneHook::new(|entity, cmd| {
                 match entity.get::<Name>().map(|t| t.as_str()) {
                     Some("Farm_Marker") => cmd.insert(Field),
@@ -411,16 +404,12 @@ fn init_entities(
 
     commands.spawn((
         Name::new("Farmer"),
-        PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Capsule {
-                depth: 0.3,
-                radius: 0.1,
-                ..default()
-            })),
-            material: materials.add(DEFAULT_COLOR.into()),
-            transform: Transform::from_xyz(0.0, 0.5, 0.0),
-            ..default()
-        },
+        Transform::from_xyz(0.0, 0.5, 0.0),
+        MeshMaterial3d(materials.add(DEFAULT_COLOR)),
+        Mesh3d(meshes.add(Mesh::from(Capsule3d {
+            half_length: 0.3,
+            radius: 0.1,
+        }))),
         Fatigue {
             is_sleeping: false,
             per_second: 2.0,
@@ -430,31 +419,31 @@ fn init_entities(
             money: 0,
             items: 0.0,
         },
-        thinker,
+        HandleThinkerSpawner(thinker),
     ));
 
     // scoreboard
     commands
-        .spawn(NodeBundle {
-            style: Style {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::End,
-                align_items: AlignItems::FlexStart,
-                padding: UiRect::all(Val::Px(20.0)),
-                ..default()
-            },
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            justify_content: JustifyContent::End,
+            align_items: AlignItems::FlexStart,
+            padding: UiRect::all(Val::Px(20.0)),
             ..default()
         })
         .with_children(|builder| {
             let text_bundle = || {
-                let style = TextStyle {
-                    font: default(),
-                    font_size: 40.0,
-                    color: Color::WHITE,
-                };
-                TextBundle::from_section("", style)
+                (
+                    TextSpan::new(""),
+                    TextColor(Color::WHITE),
+                    TextFont {
+                        font: default(),
+                        font_size: 40.0,
+                        font_smoothing: bevy::text::FontSmoothing::AntiAliased,
+                    },
+                )
             };
 
             builder.spawn((text_bundle(), MoneyText));

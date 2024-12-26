@@ -27,7 +27,7 @@ pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawn
 
     // You at least need to have a Thinker in order to schedule one-off
     // actions. It's not a general-purpose task scheduler.
-    cmd.spawn((Thirst::new(75.0, 2.0), thinker));
+    cmd.spawn((Thirst::new(75.0, 2.0), HandleThinkerSpawner(thinker)));
 }
 
 #[derive(Component, Debug)]

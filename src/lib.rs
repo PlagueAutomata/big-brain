@@ -113,7 +113,7 @@
 //! fn spawn_entity(cmd: &mut Commands, mut thinkers: ResMut<Assets<ThinkerSpawner>>) {
 //!     cmd.spawn((
 //!         Thirst(70.0, 2.0),
-//!         thinkers.add(ThinkerSpawner::first_to_score(0.8).when(Thirsty, Drink)),
+//!         HandleThinkerSpawner(thinkers.add(ThinkerSpawner::first_to_score(0.8).when(Thirsty, Drink))),
 //!     ));
 //! }
 //! ```
@@ -189,7 +189,7 @@ pub use crate::{
         ScorerCommands, ScorerQuery, ScorerSpawn, ScorerSpawner, SumOfScorers, WinningScorer,
     },
     sequence::{Sequence, SequenceMode, SequenceSpawner},
-    thinker::{Actor, HasThinker, Thinker, ThinkerSpawner},
+    thinker::{Actor, HandleThinkerSpawner, HasThinker, Thinker, ThinkerSpawner},
 };
 
 use bevy_app::{App, Plugin};

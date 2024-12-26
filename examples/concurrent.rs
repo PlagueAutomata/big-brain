@@ -98,7 +98,7 @@ pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawn
     // always select the action with the highest score
     let thinker = thinkers.add(ThinkerSpawner::highest(0.0).when(DummyScorer, steps_guess_numbers));
 
-    cmd.spawn(thinker);
+    cmd.spawn(HandleThinkerSpawner(thinker));
 }
 
 fn main() {

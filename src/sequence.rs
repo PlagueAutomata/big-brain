@@ -9,7 +9,7 @@ use bevy_ecs::{
     system::{Commands, Query},
     world::Mut,
 };
-use bevy_hierarchy::{Children, PushChild};
+use bevy_hierarchy::{AddChild, Children};
 use bevy_log as log;
 use bevy_reflect::Reflect;
 use std::sync::Arc;
@@ -268,7 +268,7 @@ fn exec_step(
     match (this_state.clone(), active_state.clone()) {
         (ActionState::Executing, ActionState::Executing | ActionState::Cancelled) => (),
         (ActionState::Executing, ActionState::Success) => {
-            cmd.add(active.despawn_recursive());
+            cmd.queue(active.despawn_recursive());
 
             if sequence.active_step == sequence.steps.len() - 1 {
                 // We're done! Let's just be successful
@@ -278,11 +278,11 @@ fn exec_step(
                 let child =
                     sequence.steps[sequence.active_step].spawn(ActionCommands::new(cmd, actor));
                 let child = child.entity();
-                cmd.add(PushChild { parent, child });
+                cmd.queue(AddChild { parent, child });
             }
         }
         (ActionState::Executing, ActionState::Failure) => {
-            cmd.add(active.despawn_recursive());
+            cmd.queue(active.despawn_recursive());
             this_state.failure();
         }
 

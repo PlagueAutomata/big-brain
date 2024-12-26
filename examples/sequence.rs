@@ -40,7 +40,7 @@ impl Thirst {
 /// Just a plain old Bevy system, big-brain is not involved yet.
 pub fn thirst_system(time: Res<Time>, mut thirsts: Query<&mut Thirst>) {
     for mut thirst in &mut thirsts {
-        thirst.thirst += thirst.per_second * time.delta_seconds();
+        thirst.thirst += thirst.per_second * time.delta_secs();
 
         // Thirst is capped at 100.0
         if thirst.thirst >= 100.0 {
@@ -100,7 +100,7 @@ fn move_to_water_source_action_system(
                     trace!("Stepping closer.");
 
                     // How far can we travel during this frame?
-                    let step_size = time.delta_seconds() * move_to.speed;
+                    let step_size = time.delta_secs() * move_to.speed;
                     // Travel towards the water-source position, but make sure to not overstep it.
                     let step = delta.normalize() * step_size.min(distance);
 
@@ -185,7 +185,7 @@ fn drink_action_system(
 
                     // Start reducing the thirst. Alternatively, you could send out some kind of
                     // DrinkFromSource event that indirectly decreases thirst.
-                    thirst.thirst -= drink.per_second * time.delta_seconds();
+                    thirst.thirst -= drink.per_second * time.delta_secs();
 
                     // Once we hit 0 thirst, we stop drinking and report success.
                     if thirst.thirst <= 0.0 {
@@ -264,7 +264,9 @@ pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawn
         Position {
             position: Vec2::new(0.0, 0.0),
         },
-        thinkers.add(ThinkerSpawner::first_to_score(0.8).when(Thirsty, move_and_drink)),
+        HandleThinkerSpawner(
+            thinkers.add(ThinkerSpawner::first_to_score(0.8).when(Thirsty, move_and_drink)),
+        ),
     ));
 }
 

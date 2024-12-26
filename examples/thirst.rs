@@ -132,17 +132,19 @@ pub fn init_entities(mut cmd: Commands, mut thinkers: ResMut<Assets<ThinkerSpawn
     // Create the entity and throw the Thirst component in there. Nothing special here.
     cmd.spawn((
         Thirst::new(75.0, 2.0),
-        thinkers.add(
-            ThinkerSpawner::first_to_score(0.8)
-                // Technically these are supposed to be ActionBuilders and
-                // ScorerBuilders, but our Clone impls simplify our code here.
-                .when(
-                    Thirsty,
-                    Drink {
-                        until: 70.0,
-                        per_second: 5.0,
-                    },
-                ),
+        HandleThinkerSpawner(
+            thinkers.add(
+                ThinkerSpawner::first_to_score(0.8)
+                    // Technically these are supposed to be ActionBuilders and
+                    // ScorerBuilders, but our Clone impls simplify our code here.
+                    .when(
+                        Thirsty,
+                        Drink {
+                            until: 70.0,
+                            per_second: 5.0,
+                        },
+                    ),
+            ),
         ),
     ));
 }

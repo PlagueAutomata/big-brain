@@ -13,7 +13,7 @@ use bevy_ecs::{
     query::Without,
     system::{Commands, Query, Res},
 };
-use bevy_hierarchy::{DespawnRecursiveExt, PushChild};
+use bevy_hierarchy::{AddChild, DespawnRecursiveExt};
 use bevy_log as log;
 use bevy_reflect::{Reflect, TypePath};
 use std::{collections::VecDeque, sync::Arc};
@@ -58,12 +58,12 @@ impl Actor {
 ///     cmd.spawn((
 ///         Thirst(70.0, 2.0),
 ///         Hunger(50.0, 3.0),
-///         thinkers.add(
+///         HandleThinkerSpawner(thinkers.add(
 ///             ThinkerSpawner::first_to_score(80.0)
 ///                 .when(Thirsty, Drink)
 ///                 .when(Hungry, Eat)
 ///                 .when(FixedScorer::IDLE, Meander),
-///         ),
+///         )),
 ///     ));
 /// }
 /// ```
@@ -117,7 +117,7 @@ pub fn thinker_system(
                 ActionState::Cancelled => continue,
                 ActionState::Success | ActionState::Failure => {
                     log::debug!("current {:?} is done, despawn", action);
-                    cmd.add(action.despawn_recursive());
+                    cmd.queue(action.despawn_recursive());
                     thinker.current = None;
                     thinker.winner = None;
                 }
@@ -139,6 +139,9 @@ pub fn thinker_system(
         }
     }
 }
+
+#[derive(Component, Clone)]
+pub struct HandleThinkerSpawner(pub Handle<ThinkerSpawner>);
 
 /// This is what you actually use to configure Thinker behavior.
 #[derive(Clone, Asset, TypePath)]
@@ -185,10 +188,10 @@ impl ThinkerSpawner {
 pub fn thinker_maintain_system(
     mut cmd: Commands,
     assets: Res<Assets<ThinkerSpawner>>,
-    with_handle: Query<(Entity, &Handle<ThinkerSpawner>), Without<HasThinker>>,
-    without_handle: Query<(Entity, &HasThinker), Without<Handle<ThinkerSpawner>>>,
+    with_handle: Query<(Entity, &HandleThinkerSpawner), Without<HasThinker>>,
+    without_handle: Query<(Entity, &HasThinker), Without<HandleThinkerSpawner>>,
 ) {
-    for (actor, handle) in with_handle.iter() {
+    for (actor, HandleThinkerSpawner(handle)) in with_handle.iter() {
         log::debug!("Spawning Thinker for Actor({:?})", actor);
 
         let Some(builder) = assets.get(handle) else {
@@ -202,7 +205,7 @@ pub fn thinker_maintain_system(
         let choices = choices.map(|ChoiceBuilder { when, then }| {
             let scorer = when.spawn(ScorerCommands::new(&mut cmd, Actor(actor)));
             let action = then.clone();
-            cmd.add(PushChild {
+            cmd.queue(AddChild {
                 parent,
                 child: scorer.0,
             });
@@ -231,7 +234,7 @@ pub fn thinker_maintain_system(
 
 pub fn actor_gone_cleanup(
     mut cmd: Commands,
-    builders: Query<&Handle<ThinkerSpawner>>,
+    builders: Query<&HandleThinkerSpawner>,
     query: Query<(Entity, &Actor)>,
 ) {
     for (child, actor) in query.iter() {

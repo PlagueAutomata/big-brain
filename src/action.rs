@@ -9,7 +9,7 @@ use bevy_ecs::{
     query::QueryData,
     system::Commands,
 };
-use bevy_hierarchy::{DespawnRecursive, PushChild};
+use bevy_hierarchy::{AddChild, DespawnRecursive};
 use bevy_reflect::Reflect;
 use bevy_utils::all_tuples;
 use std::sync::Arc;
@@ -30,7 +30,10 @@ impl Action {
 
     #[must_use]
     pub(crate) fn despawn_recursive(&self) -> DespawnRecursive {
-        DespawnRecursive { entity: self.0 }
+        DespawnRecursive {
+            entity: self.0,
+            warn: false,
+        }
     }
 }
 
@@ -54,7 +57,7 @@ impl<'w, 's, 'a> ActionCommands<'w, 's, 'a> {
     #[inline]
     pub fn push_child(&mut self, Action(parent): Action, builder: &dyn ActionSpawn) {
         let Action(child) = builder.spawn(ActionCommands::new(self.cmd, self.actor));
-        self.cmd.add(PushChild { parent, child })
+        self.cmd.queue(AddChild { parent, child })
     }
 }
 
@@ -229,7 +232,7 @@ pub struct ActionQuery {
     actor: &'static Actor,
 }
 
-impl<'w> ActionQueryItem<'w> {
+impl ActionQueryItem<'_> {
     pub fn actor(&self) -> Entity {
         self.actor.entity()
     }
@@ -269,7 +272,7 @@ impl<'w> ActionQueryItem<'w> {
     }
 }
 
-impl<'w> ActionQueryReadOnlyItem<'w> {
+impl ActionQueryReadOnlyItem<'_> {
     pub fn actor(&self) -> Entity {
         self.actor.entity()
     }

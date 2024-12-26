@@ -10,7 +10,7 @@ use bevy_ecs::{
     query::{QueryData, With},
     system::{Commands, Query},
 };
-use bevy_hierarchy::{Children, PushChild};
+use bevy_hierarchy::{AddChild, Children};
 use bevy_reflect::Reflect;
 use bevy_utils::all_tuples;
 use std::sync::Arc;
@@ -35,7 +35,7 @@ impl<'w, 's, 'a> ScorerCommands<'w, 's, 'a> {
     #[inline]
     pub fn push_child(&mut self, Scorer(parent): Scorer, builder: &dyn ScorerSpawn) {
         let Scorer(child) = builder.spawn(ScorerCommands::new(self.cmd, self.actor));
-        self.cmd.add(PushChild { parent, child })
+        self.cmd.queue(AddChild { parent, child })
     }
 }
 
@@ -135,7 +135,7 @@ pub struct ScorerQuery {
     actor: &'static Actor,
 }
 
-impl<'w> ScorerQueryItem<'w> {
+impl ScorerQueryItem<'_> {
     pub fn actor(&self) -> Entity {
         self.actor.entity()
     }
@@ -149,7 +149,7 @@ impl<'w> ScorerQueryItem<'w> {
     }
 }
 
-impl<'w> ScorerQueryReadOnlyItem<'w> {
+impl ScorerQueryReadOnlyItem<'_> {
     pub fn actor(&self) -> Entity {
         self.actor.entity()
     }
